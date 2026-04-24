@@ -59,10 +59,11 @@ export function setupWebSocketHandler(io: Server): void {
         spawnCLI(
           session,
           (raw) => socket.emit('terminal:data', { sessionId: session.id, data: raw }),
-          (chunk) => socket.emit('chat:message', {
-            sessionId: session.id,
-            message: { id: uuidv4(), ...chunk, timestamp: Date.now() },
-          }),
+          (chunk) => {
+            const message = { id: uuidv4(), ...chunk, timestamp: Date.now() };
+            session.messages.push(message);
+            socket.emit('chat:message', { sessionId: session.id, message });
+          },
           () => socket.emit('session:ended', { sessionId: session.id })
         );
 
@@ -96,12 +97,15 @@ export function setupWebSocketHandler(io: Server): void {
       getSession(sessionId)?.pty?.write(message + '\r');
     });
 
-    // ── Reconnect: replay terminal buffer ────────────────────
+    // ── Reconnect: replay terminal buffer + chat history ─────
     socket.on('session:join', ({ sessionId }: { sessionId: string }) => {
       const s = getSession(sessionId);
       if (!s) return;
       if (s.outputBuffer) {
         socket.emit('terminal:data', { sessionId, data: s.outputBuffer });
+      }
+      if (s.messages.length) {
+        socket.emit('chat:history', { sessionId, messages: s.messages });
       }
     });
 

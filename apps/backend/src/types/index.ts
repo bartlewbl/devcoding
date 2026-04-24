@@ -14,6 +14,7 @@ export interface Session {
   status: 'creating' | 'ready' | 'running' | 'ended';
   createdAt: number;
   outputBuffer: string;
+  messages: ChatMessage[];
   pty?: IPty;
   watcher?: FSWatcher;
   parser?: OutputParser;

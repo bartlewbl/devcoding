@@ -51,6 +51,7 @@ export async function createSession(
     status: 'creating',
     createdAt: Date.now(),
     outputBuffer: '',
+    messages: [],
   };
 
   sessions.set(id, session);

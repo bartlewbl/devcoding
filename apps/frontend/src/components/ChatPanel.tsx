@@ -14,13 +14,26 @@ export default function ChatPanel({ sessionId, socket }: Props) {
   const [input, setInput] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  // Clear messages when switching sessions
   useEffect(() => {
-    const handler = ({ sessionId: sid, message }: { sessionId: string; message: Msg }) => {
+    setMessages([]);
+  }, [sessionId]);
+
+  useEffect(() => {
+    const onMessage = ({ sessionId: sid, message }: { sessionId: string; message: Msg }) => {
       if (sid !== sessionId) return;
       setMessages((prev) => [...prev, message]);
     };
-    socket.on('chat:message', handler);
-    return () => { socket.off('chat:message', handler); };
+    const onHistory = ({ sessionId: sid, messages: history }: { sessionId: string; messages: Msg[] }) => {
+      if (sid !== sessionId) return;
+      setMessages(history);
+    };
+    socket.on('chat:message', onMessage);
+    socket.on('chat:history', onHistory);
+    return () => {
+      socket.off('chat:message', onMessage);
+      socket.off('chat:history', onHistory);
+    };
   }, [sessionId, socket]);
 
   useEffect(() => {
