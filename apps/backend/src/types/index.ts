@@ -16,7 +16,7 @@ export interface Session {
   outputBuffer: string;
   pty?: IPty;
   watcher?: FSWatcher;
-  parser: OutputParser;
+  parser?: OutputParser;
 }
 
 export interface SessionSummary {

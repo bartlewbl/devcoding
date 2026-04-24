@@ -8,9 +8,10 @@ import { Socket } from 'socket.io-client';
 interface Props {
   sessionId: string;
   socket: Socket;
+  tab?: string;
 }
 
-export default function Terminal({ sessionId, socket }: Props) {
+export default function Terminal({ sessionId, socket, tab }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -38,7 +39,13 @@ export default function Terminal({ sessionId, socket }: Props) {
     term.loadAddon(fit);
     term.loadAddon(new WebLinksAddon());
     term.open(containerRef.current);
-    fit.fit();
+
+    // Small delay so layout is settled before measuring
+    setTimeout(() => {
+      fit.fit();
+      const dims = fit.proposeDimensions();
+      if (dims) socket.emit('terminal:resize', { sessionId, cols: dims.cols, rows: dims.rows });
+    }, 50);
 
     termRef.current = term;
     fitRef.current = fit;
@@ -46,10 +53,11 @@ export default function Terminal({ sessionId, socket }: Props) {
     term.onData((data) => socket.emit('terminal:input', { sessionId, data }));
     term.onResize(({ cols, rows }) => socket.emit('terminal:resize', { sessionId, cols, rows }));
 
-    const ro = new ResizeObserver(() => fit.fit());
+    const ro = new ResizeObserver(() => {
+      try { fit.fit(); } catch { /* ignore if disposed */ }
+    });
     ro.observe(containerRef.current);
 
-    // Replay buffered output
     socket.emit('session:join', { sessionId });
 
     return () => {
@@ -57,6 +65,16 @@ export default function Terminal({ sessionId, socket }: Props) {
       term.dispose();
     };
   }, [sessionId, socket]);
+
+  // Re-fit whenever this tab becomes visible
+  useEffect(() => {
+    if (tab !== 'terminal') return;
+    setTimeout(() => {
+      try {
+        fitRef.current?.fit();
+      } catch { /* ignore */ }
+    }, 30);
+  }, [tab]);
 
   useEffect(() => {
     const handler = ({ sessionId: sid, data }: { sessionId: string; data: string }) => {

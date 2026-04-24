@@ -46,7 +46,11 @@ export default function ChatMessage({ message }: { message: Msg }) {
 
   if (message.type === 'system') {
     return (
-      <div className="text-zinc-600 text-xs italic py-1">{message.content}</div>
+      <div className="flex items-center gap-2 py-2">
+        <div className="flex-1 h-px bg-zinc-800" />
+        <span className="text-zinc-600 text-xs">{message.content}</span>
+        <div className="flex-1 h-px bg-zinc-800" />
+      </div>
     );
   }
 

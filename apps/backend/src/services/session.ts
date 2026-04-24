@@ -51,7 +51,6 @@ export async function createSession(
     status: 'creating',
     createdAt: Date.now(),
     outputBuffer: '',
-    parser: new OutputParser(),
   };
 
   sessions.set(id, session);
@@ -90,8 +89,8 @@ export function spawnCLI(
 
   const proc = ptyLib.spawn(shell, ['-l', '-i'], {
     name: 'xterm-256color',
-    cols: 220,
-    rows: 50,
+    cols: 160,
+    rows: 40,
     cwd: session.worktreePath,
     env: {
       ...process.env,
@@ -100,6 +99,9 @@ export function spawnCLI(
     },
   });
 
+  const parser = new OutputParser(onParsed);
+  session.parser = parser;
+
   // Give the shell ~800ms to source its profile, then launch the CLI
   setTimeout(() => proc.write(cmdLine + '\r'), 800);
 
@@ -107,7 +109,7 @@ export function spawnCLI(
     // Keep a rolling buffer for terminal replay on reconnect
     session.outputBuffer = (session.outputBuffer + data).slice(-OUTPUT_BUFFER_MAX);
     onData(data);
-    session.parser.process(data).forEach(onParsed);
+    parser.process(data);
   });
 
   proc.onExit(() => {

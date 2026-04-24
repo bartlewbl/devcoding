@@ -153,13 +153,13 @@ export default function Session() {
             </button>
           </div>
 
-          {/* Tab content */}
-          <div className="flex-1 min-h-0">
-            <div className={tab === 'chat' ? 'h-full' : 'hidden h-full'}>
+          {/* Tab content — both are always mounted so xterm can measure correctly */}
+          <div className="flex-1 min-h-0 relative">
+            <div className={`absolute inset-0 ${tab === 'chat' ? '' : 'invisible pointer-events-none'}`}>
               <ChatPanel sessionId={sessionId} socket={socket} />
             </div>
-            <div className={tab === 'terminal' ? 'h-full' : 'hidden h-full'}>
-              <Terminal sessionId={sessionId} socket={socket} />
+            <div className={`absolute inset-0 ${tab === 'terminal' ? '' : 'invisible pointer-events-none'}`}>
+              <Terminal sessionId={sessionId} socket={socket} tab={tab} />
             </div>
           </div>
         </div>
