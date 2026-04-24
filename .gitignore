@@ -45,3 +45,6 @@ coverage
 
 # Misc
 *.tsbuildinfo
+
+# Persistent session data
+apps/backend/.data

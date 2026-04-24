@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState, KeyboardEvent, useMemo } from 'react';
 import { Socket } from 'socket.io-client';
 import { Send } from 'lucide-react';
-import { ChatMessage as Msg } from '../types';
+import { ChatMessage as Msg, SessionSummary } from '../types';
 import UserTurn from './UserTurn';
 import AssistantTurn from './AssistantTurn';
 
 interface Props {
   sessionId: string;
   socket: Socket;
+  model?: SessionSummary['model'];
 }
 
 export type Turn =
@@ -28,18 +29,26 @@ function groupIntoTurns(msgs: Msg[]): Turn[] {
   return turns;
 }
 
-export default function ChatPanel({ sessionId, socket }: Props) {
+export default function ChatPanel({ sessionId, socket, model }: Props) {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const handler = ({ sessionId: sid, message }: { sessionId: string; message: Msg }) => {
+    const onMessage = ({ sessionId: sid, message }: { sessionId: string; message: Msg }) => {
       if (sid !== sessionId) return;
       setMessages((prev) => [...prev, message]);
     };
-    socket.on('chat:message', handler);
-    return () => { socket.off('chat:message', handler); };
+    const onHistory = ({ sessionId: sid, messages: hist }: { sessionId: string; messages: Msg[] }) => {
+      if (sid !== sessionId) return;
+      setMessages(hist);
+    };
+    socket.on('chat:message', onMessage);
+    socket.on('chat:history', onHistory);
+    return () => {
+      socket.off('chat:message', onMessage);
+      socket.off('chat:history', onHistory);
+    };
   }, [sessionId, socket]);
 
   useEffect(() => {
@@ -76,7 +85,7 @@ export default function ChatPanel({ sessionId, socket }: Props) {
             turn.role === 'user' ? (
               <UserTurn key={i} messages={turn.messages} />
             ) : (
-              <AssistantTurn key={i} messages={turn.messages} />
+              <AssistantTurn key={i} messages={turn.messages} model={model} />
             )
           )}
         </div>

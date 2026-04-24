@@ -85,36 +85,31 @@ export default function NewSessionModal({ socket, onClose, onCreated }: Props) {
             </div>
           </div>
 
-          <div>
-            <label className="block text-xs text-zinc-400 mb-2">Model</label>
-            <select
-              value={modelName}
-              onChange={(e) => setModelName(e.target.value)}
-              className="w-full bg-zinc-800 text-zinc-200 text-sm rounded-lg px-3 py-2 border border-zinc-700 focus:outline-none focus:ring-1 focus:ring-zinc-600"
-            >
-              {model === 'claude' ? (
-                <>
-                  <option value="claude-haiku-4-5-20251001">claude-haiku-4-5-20251001</option>
-                  <option value="claude-sonnet-4-6">claude-sonnet-4-6</option>
-                  <option value="claude-opus-4-7">claude-opus-4-7</option>
-                </>
-              ) : model === 'kimi' ? (
-                <>
-                  <option value="kimi-k2">kimi-k2</option>
-                  <option value="kimi-k2-thinking">kimi-k2-thinking</option>
-                  <option value="kimi-k2.5">kimi-k2.5</option>
-                  <option value="kimi-k2.6">kimi-k2.6</option>
-                </>
-              ) : (
-                <>
-                  <option value="gpt-5.4">gpt-5.4</option>
-                  <option value="gpt-5.4-mini">gpt-5.4-mini</option>
-                  <option value="gpt-5.3-codex-spark">gpt-5.3-codex-spark</option>
-                  <option value="gpt-5.1-codex">gpt-5.1-codex</option>
-                </>
-              )}
-            </select>
-          </div>
+          {model !== 'kimi' && (
+            <div>
+              <label className="block text-xs text-zinc-400 mb-2">Model</label>
+              <select
+                value={modelName}
+                onChange={(e) => setModelName(e.target.value)}
+                className="w-full bg-zinc-800 text-zinc-200 text-sm rounded-lg px-3 py-2 border border-zinc-700 focus:outline-none focus:ring-1 focus:ring-zinc-600"
+              >
+                {model === 'claude' ? (
+                  <>
+                    <option value="claude-haiku-4-5-20251001">claude-haiku-4-5-20251001</option>
+                    <option value="claude-sonnet-4-6">claude-sonnet-4-6</option>
+                    <option value="claude-opus-4-7">claude-opus-4-7</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="gpt-5.4">gpt-5.4</option>
+                    <option value="gpt-5.4-mini">gpt-5.4-mini</option>
+                    <option value="gpt-5.3-codex-spark">gpt-5.3-codex-spark</option>
+                    <option value="gpt-5.1-codex">gpt-5.1-codex</option>
+                  </>
+                )}
+              </select>
+            </div>
+          )}
 
           {model === 'claude' && (
             <div>

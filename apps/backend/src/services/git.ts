@@ -2,6 +2,7 @@ import simpleGit from 'simple-git';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import { registerWorktree, unregisterWorktree } from './worktree-manager';
 
 const BASE = path.join(os.homedir(), '.ai-code-studio');
 const REPOS = path.join(BASE, 'repos');
@@ -43,7 +44,8 @@ export async function createWorktree(
   sessionId: string,
   branch: string,
   token: string,
-  repoUrl: string
+  repoUrl: string,
+  repoFullName: string
 ): Promise<string> {
   ensureDirs();
   const worktreePath = path.join(WORKTREES, sessionId);
@@ -52,13 +54,25 @@ export async function createWorktree(
   await git.remote(['set-url', 'origin', withToken(repoUrl, token)]);
   await git.raw(['worktree', 'add', worktreePath, '-b', branch]);
 
+  registerWorktree({
+    sessionId,
+    repoPath,
+    repoFullName,
+    branch,
+    worktreePath,
+    createdAt: Date.now(),
+  });
+
   return worktreePath;
 }
 
-export async function removeWorktree(repoPath: string, worktreePath: string): Promise<void> {
+export async function removeWorktree(repoPath: string, worktreePath: string, sessionId?: string): Promise<void> {
   if (!fs.existsSync(worktreePath)) return;
   const git = simpleGit(repoPath);
   await git.raw(['worktree', 'remove', '--force', worktreePath]).catch(() => null);
+  if (sessionId) {
+    unregisterWorktree(sessionId);
+  }
 }
 
 export async function pushBranch(worktreePath: string, branch: string): Promise<void> {

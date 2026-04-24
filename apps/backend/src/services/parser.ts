@@ -1,9 +1,18 @@
 import { Terminal } from '@xterm/headless';
+import { CLIProvider } from '../types';
+
+export { CLIProvider };
+export type ParsedChunkType = 'tool-call' | 'ai-text' | 'system';
 
 export interface ParsedChunk {
-  type: 'tool-call' | 'ai-text' | 'system';
+  type: ParsedChunkType;
   content: string;
   toolName?: string;
+}
+
+export interface UsageEvent {
+  provider: CLIProvider;
+  rawLine: string;
 }
 
 // ── ANSI helpers ──────────────────────────────────────────────────────────────
@@ -28,49 +37,148 @@ function stripStrikethrough(s: string): string {
   return s.replace(STRIKE_CHARS, '');
 }
 
-// ── Noise patterns ────────────────────────────────────────────────────────────
-const NOISE: RegExp[] = [
-  /\(thinking\)/,
-  /^Thinking[.\s]*/i,
-  /Contemplating/i,
-  /esc\s*to\s*interrupt/i,
-  /Update available/i,
-  /brew upgrade/i,
-  /^[─━═\-─]{5,}$/,
-  /^\(base\).*[@%]/,
-  /^[▐▌▛▜▝▞▟▘▙▚]/u,
-  /^Security guide/i,
-  /^Accessing workspace/i,
-  /^Quick safety check/i,
-  /Claude Code.{0,30}ll be able/i,
-  /Enter to confirm|Esc to cancel/i,
-  /^\? for shortcuts/,
-  /^❯\s*\d+\./,
-  /ctrl\+o to expand/i,
-  /^\s*\(ctrl\+/i,
-  /^[✶✻✽✢✳⏺·⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s*$/u,
-  // Cost / usage tracking noise from claude-code
-  /^Now usi/i,
-  /extra usage/i,
-  /^(?:Now )?using\s+(?:extra\s+)?usage/i,
-  /^[\d,]+\s*\$?\d+\.\d+\s*(?:USD|tokens?|input|output)/i,
-  /claude-code\s*$/i,
-  /anthropic\s*cost/i,
-  // Prompt / input noise
-  /^What would you like to work on/i,
-  /^Forming[.…]*/i,
-  /^\s*[›>]\s*$/,                 // lone arrows
-  /^\s*[─━═\-─_]+\s*$/,           // lines of only dashes/box drawing
-];
+// ── Provider-specific configs ─────────────────────────────────────────────────
+interface ProviderConfig {
+  toolPrefixes: string[];
+  noise: RegExp[];
+  usagePatterns: RegExp[];
+  bulletChars: string;
+}
 
-function isNoise(t: string): boolean {
-  return NOISE.some(p => p.test(t));
+const PROVIDER_CONFIGS: Record<CLIProvider, ProviderConfig> = {
+  claude: {
+    toolPrefixes: [
+      'Read', 'Write', 'Edit', 'Create', 'Delete', 'Bash', 'Search', 'Grep',
+      'Glob', 'List', 'View', 'Run', 'Fetch', 'Call', 'Todo',
+      'Resumed session', 'Updated', 'Modified', 'Searched code', 'Edited',
+      'Ran', 'Wrote', 'Listed', 'WebFetch', 'WebSearch', 'MCP', 'Thinking',
+    ],
+    noise: [
+      /\(thinking\)/,
+      /^Thinking[.\s]*/i,
+      /Contemplating/i,
+      /esc\s*to\s*interrupt/i,
+      /Update available/i,
+      /brew upgrade/i,
+      /^[─━═\-─]{5,}$/,
+      /^\(base\).*[@%]/,
+      /^[▐▌▛▜▝▞▟▘▙▚]/u,
+      /^Security guide/i,
+      /^Accessing workspace/i,
+      /^Quick safety check/i,
+      /Claude Code.{0,30}ll be able/i,
+      /Enter to confirm|Esc to cancel/i,
+      /^\? for shortcuts/,
+      /^❯\s*\d+\./,
+      /ctrl\+o to expand/i,
+      /^\s*\(ctrl\+/i,
+      /^[✶✻✽✢✳⏺·⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s*$/u,
+      // Cost / usage tracking noise from claude-code — these get captured as usage events
+      /^Now usi/i,
+      /extra usage/i,
+      /^(?:Now )?using\s+(?:extra\s+)?usage/i,
+      /^[\d,]+\s*\$?\d+\.\d+\s*(?:USD|tokens?|input|output)/i,
+      /claude-code\s*$/i,
+      /anthropic\s*cost/i,
+      // Prompt / input noise
+      /^What would you like to work on/i,
+      /^Forming[.…]*/i,
+      /^\s*[›>]\s*$/,                 // lone arrows
+      /^\s*[─━═\-─_]+\s*$/,           // lines of only dashes/box drawing
+      /^\s*⏺\s*$/,                    // lone bullet
+    ],
+    usagePatterns: [
+      /\$[\d,]+\.\d+\s*(?:USD)?/i,
+      /[\d,]+\s*(?:tokens?|input|output)/i,
+      /^Now usi/i,
+      /extra usage/i,
+      /anthropic\s*cost/i,
+      /claude-code\s*$/i,
+    ],
+    bulletChars: '⏺·',
+  },
+  kimi: {
+    toolPrefixes: [
+      'Read', 'Write', 'Edit', 'Create', 'Delete', 'Bash', 'Search', 'Grep',
+      'Glob', 'List', 'View', 'Run', 'Fetch', 'Call', 'Todo',
+      'Resumed session', 'Updated', 'Modified', 'Searched code', 'Edited',
+      'Ran', 'Wrote', 'Listed', 'WebFetch', 'WebSearch', 'MCP', 'Thinking',
+      'Tool', 'Execute', 'Command',
+    ],
+    noise: [
+      /\(thinking\)/,
+      /^Thinking[.\s]*/i,
+      /esc\s*to\s*interrupt/i,
+      /Update available/i,
+      /^[─━═\-─]{5,}$/,
+      /^\(base\).*[@%]/,
+      /^[▐▌▛▜▝▞▟▘▙▚]/u,
+      /^[✶✻✽✢✳⏺·⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s*$/u,
+      /^\s*[›>]\s*$/,
+      /^\s*[─━═\-─_]+\s*$/,
+      /^\s*●\s*$/,
+      /kimi-cli\s*version/i,
+      /^Loading\.\.\./i,
+      /^\s*\(ctrl\+/i,
+    ],
+    usagePatterns: [
+      /\$[\d,]+\.\d+/i,
+      /[\d,]+\s*(?:tokens?|input|output)/i,
+      /usage/i,
+      /cost/i,
+    ],
+    bulletChars: '●·',
+  },
+  codex: {
+    toolPrefixes: [
+      'Read', 'Write', 'Edit', 'Create', 'Delete', 'Bash', 'Search', 'Grep',
+      'Glob', 'List', 'View', 'Run', 'Fetch', 'Call', 'Todo',
+      'Resumed session', 'Updated', 'Modified', 'Searched code', 'Edited',
+      'Ran', 'Wrote', 'Listed', 'WebFetch', 'WebSearch', 'MCP', 'Thinking',
+      'Command',
+    ],
+    noise: [
+      /\(thinking\)/,
+      /^Thinking[.\s]*/i,
+      /esc\s*to\s*interrupt/i,
+      /Update available/i,
+      /^[─━═\-─]{5,}$/,
+      /^\(base\).*[@%]/,
+      /^[▐▌▛▜▝▞▟▘▙▚]/u,
+      /^[✶✻✽✢✳⏺·⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s*$/u,
+      /^\s*[›>]\s*$/,
+      /^\s*[─━═\-─_]+\s*$/,
+      /^\s*\$\s*$/,                   // lone $
+      /codex\s*version/i,
+      /^Loading\.\.\./i,
+      /^\s*\(ctrl\+/i,
+      /^\$\s+/,                        // shell prompt noise
+    ],
+    usagePatterns: [
+      /\$[\d,]+\.\d+/i,
+      /[\d,]+\s*(?:tokens?|input|output)/i,
+      /usage/i,
+      /cost/i,
+    ],
+    bulletChars: '·',
+  },
+};
+
+// ── Noise detection ───────────────────────────────────────────────────────────
+function createIsNoise(config: ProviderConfig) {
+  return (t: string): boolean => config.noise.some(p => p.test(t));
+}
+
+function createIsUsage(config: ProviderConfig) {
+  return (t: string): boolean => config.usagePatterns.some(p => p.test(t));
 }
 
 // ── Garbage detection ─────────────────────────────────────────────────────────
 // Reject lines that are mostly special characters (overwritten terminal garbage)
 function isGarbage(t: string): boolean {
   if (!t) return true;
+  // Never treat markdown code fences as garbage
+  if (/^```/.test(t.trim())) return false;
   const visible = t.replace(/\s/g, '');
   if (!visible) return true;
   const alnum = visible.replace(/[^a-zA-Z0-9]/g, '').length;
@@ -83,23 +191,153 @@ function isGarbage(t: string): boolean {
 }
 
 // ── Tool call detection ───────────────────────────────────────────────────────
-const TOOL_PREFIXES = [
-  'Read', 'Write', 'Edit', 'Create', 'Delete', 'Bash', 'Search', 'Grep',
-  'Glob', 'List', 'View', 'Run', 'Fetch', 'Call', 'Todo',
-  'Resumed session', 'Updated', 'Modified', 'Searched code', 'Edited',
-  'Ran', 'Wrote', 'Listed', 'WebFetch', 'WebSearch', 'MCP', 'Thinking',
-];
-const TOOL_RE = new RegExp(`^(${TOOL_PREFIXES.join('|')})`, 'i');
-const ARROW_RE = /[›>⟩]\s*$/;
+function createIsToolCall(config: ProviderConfig) {
+  const TOOL_RE = new RegExp(`^(${config.toolPrefixes.join('|')})`, 'i');
+  const ARROW_RE = /[›>⟩]\s*$/;
 
-function isToolCall(t: string) {
-  if (!ARROW_RE.test(t) || !TOOL_RE.test(t)) return false;
-  return true;
+  return (t: string) => {
+    if (!ARROW_RE.test(t) || !TOOL_RE.test(t)) return false;
+    return true;
+  };
 }
-function toolName(t: string) { return t.replace(ARROW_RE, '').trim().split(/\s+/).slice(0, 4).join(' '); }
+
+function toolName(t: string) { return t.replace(/[\u203A>]\s*$/, '').trim().split(/\s+/).slice(0, 4).join(' '); }
 
 const SUMMARY_RE = /^(Read|Listed|Searched|Ran|Wrote|Created|Edited|Fetched)\s+\d+/i;
 function isToolSummary(t: string) { return SUMMARY_RE.test(t); }
+
+// ── Content formatting ────────────────────────────────────────────────────────
+function formatContent(lines: string[], config: ProviderConfig): string {
+  if (lines.length === 0) return '';
+
+  const result: string[] = [];
+  let inRawCodeBlock = false;   // inside existing ```...```
+  let inDetectedBlock = false;  // inside auto-detected code block
+  let codeBlockLang = '';
+  let codeBuffer: string[] = [];
+
+  const flushDetected = () => {
+    if (codeBuffer.length > 0) {
+      const lang = codeBlockLang || '';
+      result.push('```' + lang);
+      result.push(...codeBuffer);
+      result.push('```');
+      codeBuffer = [];
+    }
+    inDetectedBlock = false;
+    codeBlockLang = '';
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    // Check for raw code fences
+    const fenceMatch = trimmed.match(/^```(\w*)/);
+    if (fenceMatch) {
+      if (inDetectedBlock) {
+        flushDetected();
+      }
+      inRawCodeBlock = !inRawCodeBlock;
+      result.push(line);
+      continue;
+    }
+
+    // If inside a raw code block, pass through
+    if (inRawCodeBlock) {
+      result.push(line);
+      continue;
+    }
+
+    // Strip provider-specific bullet chars from start of text lines
+    const bulletRe = new RegExp(`^[${config.bulletChars}]\\s*`, 'u');
+    const cleanLine = line.replace(bulletRe, '');
+    const cleanTrimmed = cleanLine.trim();
+
+    // Detect indented code blocks
+    const INDENTED_CODE_RE = /^( {4,}|\t)/;
+    if (INDENTED_CODE_RE.test(line) && !cleanTrimmed.startsWith('-') && !cleanTrimmed.startsWith('*')) {
+      if (!inDetectedBlock) {
+        inDetectedBlock = true;
+      }
+      codeBuffer.push(cleanLine.replace(INDENTED_CODE_RE, ''));
+      continue;
+    }
+
+    // Auto-detect code blocks by pattern
+    if (!inDetectedBlock && cleanTrimmed.length > 0) {
+      const lang = detectLanguage(cleanTrimmed);
+      if (lang) {
+        // Look ahead: if next few lines also look like code, start a block
+        const lookAhead = lines.slice(i + 1, i + 4);
+        const codeLikeLines = lookAhead.filter(l => {
+          const lt = l.trim();
+          return lt.length > 0 && (
+            INDENTED_CODE_RE.test(l) ||
+            detectLanguage(lt) ||
+            /^[a-z_][a-z0-9_]*\s*[=:]|^\{|^\}|^\(|^\)|^function |^class |^const |^let |^var |^if |^for |^while |^return |^import |^export /.test(lt)
+          );
+        }).length;
+
+        if (codeLikeLines >= 1 || /^[a-z_][a-z0-9_]*\s*[=:]/i.test(cleanTrimmed)) {
+          inDetectedBlock = true;
+          codeBlockLang = lang;
+          codeBuffer.push(cleanTrimmed);
+          continue;
+        }
+      }
+    }
+
+    // Regular text line
+    if (inDetectedBlock && codeBuffer.length > 0) {
+      // Check if we should end the detected code block
+      if (cleanTrimmed.length === 0 || /^[a-zA-Z][a-zA-Z\s]{2,50}[.!?]$/.test(cleanTrimmed)) {
+        flushDetected();
+        if (cleanTrimmed.length > 0) result.push(cleanLine);
+        continue;
+      }
+      codeBuffer.push(cleanTrimmed);
+      continue;
+    }
+
+    result.push(cleanLine);
+  }
+
+  if (inDetectedBlock) {
+    flushDetected();
+  }
+
+  return result.join('\n');
+}
+
+function detectLanguage(line: string): string | undefined {
+  const extMatch = line.match(/\.(ts|tsx|js|jsx|py|json|yaml|yml|html|css|rs|go|java|md|sql|sh|bash|dockerfile)\b/i);
+  if (extMatch) {
+    const ext = extMatch[1].toLowerCase();
+    const map: Record<string, string> = {
+      ts: 'typescript', tsx: 'tsx', js: 'javascript', jsx: 'jsx',
+      py: 'python', rs: 'rust', go: 'go', java: 'java', md: 'markdown',
+      yml: 'yaml', sh: 'bash', dockerfile: 'dockerfile',
+    };
+    return map[ext] || ext;
+  }
+
+  // Check for shebang
+  if (/^#![\/\w]+/.test(line)) {
+    if (line.includes('python')) return 'python';
+    if (line.includes('node')) return 'javascript';
+    if (line.includes('bash') || line.includes('sh')) return 'bash';
+  }
+
+  // Check for language keywords
+  if (/^(import|from|export|const|let|var|function|interface|type)\s/.test(line)) return 'typescript';
+  if (/^(def|class|import|from)\s/.test(line)) return 'python';
+  if (/^(package|import|public|class|interface)\s/.test(line)) return 'java';
+  if (/^(fn|let|mut|use|mod|pub)\s/.test(line)) return 'rust';
+  if (/^(package|func|import|type)\s/.test(line)) return 'go';
+
+  return undefined;
+}
 
 // ── Parser (headless terminal approach) ───────────────────────────────────────
 export class OutputParser {
@@ -110,14 +348,31 @@ export class OutputParser {
   // Sliding-window extraction state
   private seenHashes = new Set<string>();
   private lastCursorY = 0;
+  private isNoise: (t: string) => boolean;
+  private isUsage: (t: string) => boolean;
+  private isToolCall: (t: string) => boolean;
 
-  constructor(private readonly onParsed: (chunk: ParsedChunk) => void) {
+  constructor(
+    private readonly provider: CLIProvider,
+    private readonly onParsed: (chunk: ParsedChunk) => void,
+    private readonly onUsage?: (event: UsageEvent) => void
+  ) {
+    const config = PROVIDER_CONFIGS[provider];
+    if (!config) {
+      console.error(`[OutputParser] Unknown provider: ${provider}. Falling back to claude config.`);
+    }
+    const effectiveConfig = config || PROVIDER_CONFIGS.claude;
+
     this.term = new Terminal({
       allowProposedApi: true,
       cols: 160,
       rows: 40,
       scrollback: 5000,
     });
+
+    this.isNoise = createIsNoise(effectiveConfig);
+    this.isUsage = createIsUsage(effectiveConfig);
+    this.isToolCall = createIsToolCall(effectiveConfig);
   }
 
   process(raw: string): void {
@@ -177,30 +432,39 @@ export class OutputParser {
 
     if (!freshLines.length) return;
 
-    let textBuf = '';
-    const flush = () => {
-      if (textBuf.trim()) {
-        this.onParsed({ type: 'ai-text', content: textBuf.trim() });
-        textBuf = '';
+    const config = PROVIDER_CONFIGS[this.provider] || PROVIDER_CONFIGS.claude;
+    let textLines: string[] = [];
+    const flushText = () => {
+      if (textLines.length) {
+        const formatted = formatContent(textLines, config);
+        if (formatted.trim()) {
+          this.onParsed({ type: 'ai-text', content: formatted.trim() });
+        }
+        textLines = [];
       }
     };
 
     for (const t of freshLines) {
-      if (isNoise(t)) continue;
+      // Check for usage data before treating as noise
+      if (this.isUsage(t)) {
+        this.onUsage?.({ provider: this.provider, rawLine: t });
+        continue;
+      }
+
+      if (this.isNoise(t)) continue;
       if (isGarbage(t)) continue;
 
-      if (isToolCall(t)) {
-        flush();
+      if (this.isToolCall(t)) {
+        flushText();
         this.onParsed({ type: 'tool-call', content: t, toolName: toolName(t) });
       } else if (isToolSummary(t)) {
-        flush();
+        flushText();
         this.onParsed({ type: 'tool-call', content: t + ' ›', toolName: toolName(t + ' ›') });
       } else {
-        const content = t.replace(/^[⏺·]\s*/u, '');
-        if (content) textBuf += (textBuf ? '\n' : '') + content;
+        textLines.push(t);
       }
     }
-    flush();
+    flushText();
 
     this.lastCursorY = cursorY;
   }

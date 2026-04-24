@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Github, LogOut, Zap, Clock, CheckCircle, XCircle } from 'lucide-react';
+import { Plus, Github, LogOut, Zap, Clock, CheckCircle, XCircle, FolderGit, BarChart3 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useSocket } from '../hooks/useSocket';
 import api from '../lib/api';
@@ -13,6 +13,7 @@ const STATUS_ICON = {
   creating: <Clock size={12} className="text-yellow-500" />,
   ready: <CheckCircle size={12} className="text-green-500" />,
   running: <Zap size={12} className="text-blue-400" />,
+  stopped: <Clock size={12} className="text-orange-400" />,
   ended: <XCircle size={12} className="text-zinc-600" />,
 };
 
@@ -36,9 +37,13 @@ export default function Dashboard() {
     socket.on('session:created', (s: SessionSummary) => {
       setSessions((prev) => [...prev.filter((x) => x.id !== s.id), s]);
     });
+    socket.on('session:updated', (s: SessionSummary) => {
+      setSessions((prev) => prev.map((x) => (x.id === s.id ? s : x)));
+    });
     return () => {
       socket.off('sessions:list');
       socket.off('session:created');
+      socket.off('session:updated');
     };
   }, [socket]);
 
@@ -66,6 +71,20 @@ export default function Dashboard() {
               <Github size={13} /> GitHub connected
             </span>
           )}
+          <button
+            onClick={() => navigate('/worktrees')}
+            className="flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-300 transition-colors"
+            title="Manage worktrees"
+          >
+            <FolderGit size={16} />
+          </button>
+          <button
+            onClick={() => navigate('/usage')}
+            className="flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-300 transition-colors"
+            title="Manage usage"
+          >
+            <BarChart3 size={16} />
+          </button>
           <button onClick={logout} className="text-zinc-500 hover:text-zinc-300 transition-colors">
             <LogOut size={16} />
           </button>

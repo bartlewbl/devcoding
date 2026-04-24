@@ -16,6 +16,7 @@ const STATUS_ICON = {
   creating: <Clock size={12} className="text-yellow-500 shrink-0" />,
   ready: <CheckCircle size={12} className="text-green-500 shrink-0" />,
   running: <Zap size={12} className="text-blue-400 shrink-0" />,
+  stopped: <Clock size={12} className="text-orange-400 shrink-0" />,
   ended: <XCircle size={12} className="text-zinc-600 shrink-0" />,
 };
 
@@ -81,6 +82,7 @@ export default function Session() {
 
     socket.on('session:updated', (summary: SessionSummary) => {
       if (summary.id === sessionId) setSession(summary);
+      setAllSessions((prev) => prev.map((s) => (s.id === summary.id ? summary : s)));
     });
 
     socket.on('session:error', ({ sessionId: sid, error }: { sessionId?: string; error: string }) => {
@@ -255,7 +257,7 @@ export default function Session() {
           {/* Tab content — both are always mounted so xterm can measure correctly */}
           <div className="flex-1 min-h-0 relative">
             <div className={`absolute inset-0 ${tab === 'chat' ? '' : 'invisible pointer-events-none'}`}>
-              <ChatPanel sessionId={sessionId} socket={socket} />
+              <ChatPanel sessionId={sessionId} socket={socket} model={session.model} />
             </div>
             <div className={`absolute inset-0 ${tab === 'terminal' ? '' : 'invisible pointer-events-none'}`}>
               <Terminal sessionId={sessionId} socket={socket} tab={tab} />

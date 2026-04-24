@@ -10,12 +10,20 @@ import {
   endSession,
   pushSession,
   updateSessionConfig,
+  touchSession,
+  restartSession,
+  toSummary,
+  stopSession,
+  addMessage,
 } from '../services/session';
 import { getDiff } from '../services/git';
 import { githubTokens } from '../routes/github';
 import { JwtPayload } from '../middleware/auth';
+import { ChatMessage } from '../types';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
+const IDLE_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours
+const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;   // 5 minutes
 
 export function setupWebSocketHandler(io: Server): void {
   io.use((socket, next) => {
@@ -31,8 +39,11 @@ export function setupWebSocketHandler(io: Server): void {
   io.on('connection', (socket: Socket) => {
     const userId: string = (socket as any).userId;
 
-    // Send existing sessions on connect
-    socket.emit('sessions:list', listSessions());
+    // Join a user-specific room so multi-tab sync works for session metadata
+    socket.join(userId);
+
+    // Send existing sessions on connect (scoped to user)
+    socket.emit('sessions:list', listSessions(userId));
 
     // ── Create session ──────────────────────────────────────
     socket.on('session:create', async ({ repoUrl, repoFullName, model, effort, modelName }) => {
@@ -43,38 +54,34 @@ export function setupWebSocketHandler(io: Server): void {
       }
 
       try {
-        socket.emit('session:status', { status: 'cloning', message: 'Cloning repository…' });
-        const session = await createSession(repoUrl, repoFullName, model, effort, token, modelName);
+        socket.emit('session:status', { status: 'creating', message: 'Cloning repository…' });
+        const session = await createSession(userId, repoUrl, repoFullName, model, effort, token, modelName);
 
-        socket.emit('session:created', {
-          id: session.id,
-          branch: session.branch,
-          model: session.model,
-          modelName: session.modelName,
-          effort: session.effort,
-          status: session.status,
-          repoFullName: session.repoFullName,
-          createdAt: session.createdAt,
-        });
+        // Join the session room so this socket receives room-scoped events
+        socket.join(session.id);
 
-        // Spawn CLI
+        const summary = toSummary(session);
+        socket.emit('session:created', summary);
+
+        // Spawn CLI — emit to the session room so any viewer gets updates
         spawnCLI(
           session,
-          (raw) => socket.emit('terminal:data', { sessionId: session.id, data: raw }),
-          (chunk) => socket.emit('chat:message', {
-            sessionId: session.id,
-            message: { id: uuidv4(), ...chunk, timestamp: Date.now() },
-          }),
-          () => socket.emit('session:ended', { sessionId: session.id })
+          (raw) => io.to(session.id).emit('terminal:data', { sessionId: session.id, data: raw }),
+          (chunk) => {
+            const message: ChatMessage = { id: uuidv4(), ...chunk, timestamp: Date.now() };
+            addMessage(session.id, message);
+            io.to(session.id).emit('chat:message', { sessionId: session.id, message });
+          },
+          () => io.to(session.id).emit('session:ended', { sessionId: session.id })
         );
 
-        // Watch files
+        // Watch files — emit to the session room
         watchFiles(session, async (files) => {
-          socket.emit('files:update', { sessionId: session.id, files });
+          io.to(session.id).emit('files:update', { sessionId: session.id, files });
           // Send diffs for up to 5 files
           for (const f of files.slice(0, 5)) {
             const diff = await getDiff(session.worktreePath, f);
-            if (diff) socket.emit('diff:update', { sessionId: session.id, file: f, diff });
+            if (diff) io.to(session.id).emit('diff:update', { sessionId: session.id, file: f, diff });
           }
         });
 
@@ -86,22 +93,35 @@ export function setupWebSocketHandler(io: Server): void {
 
     // ── Terminal I/O ─────────────────────────────────────────
     socket.on('terminal:input', ({ sessionId, data }: { sessionId: string; data: string }) => {
-      getSession(sessionId)?.pty?.write(data);
+      const s = getSession(sessionId);
+      if (!s || s.userId !== userId) return;
+      touchSession(sessionId);
+      s.pty?.write(data);
     });
 
     socket.on('terminal:resize', ({ sessionId, cols, rows }: { sessionId: string; cols: number; rows: number }) => {
-      getSession(sessionId)?.pty?.resize(cols, rows);
+      const s = getSession(sessionId);
+      if (!s || s.userId !== userId) return;
+      touchSession(sessionId);
+      s.pty?.resize(cols, rows);
     });
 
     // ── Chat input → PTY ─────────────────────────────────────
     socket.on('session:chat', ({ sessionId, message }: { sessionId: string; message: string }) => {
-      getSession(sessionId)?.pty?.write(message + '\r');
+      const s = getSession(sessionId);
+      if (!s || s.userId !== userId) return;
+      touchSession(sessionId);
+      // Persist user message so other tabs / late joiners see it
+      const msg: ChatMessage = { id: uuidv4(), type: 'user' as const, content: message, timestamp: Date.now() };
+      addMessage(sessionId, msg);
+      io.to(sessionId).emit('chat:message', { sessionId, message: msg });
+      s.pty?.write(message + '\r');
     });
 
     // ── Update session config (provider / model / effort) ─────
     socket.on('session:update-config', ({ sessionId, model, modelName, effort }: { sessionId: string; model?: 'claude' | 'kimi' | 'codex'; modelName?: string; effort?: 'low' | 'medium' | 'high' }) => {
       const s = getSession(sessionId);
-      if (!s) return;
+      if (!s || s.userId !== userId) return;
 
       const oldModelName = s.modelName;
       const oldModel = s.model;
@@ -115,13 +135,45 @@ export function setupWebSocketHandler(io: Server): void {
         }
       }
 
-      io.emit('session:updated', summary);
+      io.to(userId).emit('session:updated', summary);
     });
 
-    // ── Reconnect: replay terminal buffer ────────────────────
+    // ── Reconnect: replay terminal buffer + chat history ─────
     socket.on('session:join', ({ sessionId }: { sessionId: string }) => {
       const s = getSession(sessionId);
-      if (!s) return;
+      if (!s || s.userId !== userId) return;
+
+      touchSession(sessionId);
+      socket.join(sessionId);
+
+      // Send chat history so the joining tab sees previous messages
+      if (s.messages.length > 0) {
+        socket.emit('chat:history', { sessionId, messages: s.messages });
+      }
+
+      if (s.status === 'stopped') {
+        const restarted = restartSession(
+          sessionId,
+          (raw) => io.to(sessionId).emit('terminal:data', { sessionId, data: raw }),
+          (chunk) => {
+            const message: ChatMessage = { id: uuidv4(), ...chunk, timestamp: Date.now() };
+            addMessage(sessionId, message);
+            io.to(sessionId).emit('chat:message', { sessionId, message });
+          },
+          () => io.to(sessionId).emit('session:ended', { sessionId }),
+          async (files) => {
+            io.to(sessionId).emit('files:update', { sessionId, files });
+            for (const f of files.slice(0, 5)) {
+              const diff = await getDiff(s.worktreePath, f);
+              if (diff) io.to(sessionId).emit('diff:update', { sessionId, file: f, diff });
+            }
+          }
+        );
+        if (restarted) {
+          io.to(userId).emit('session:updated', toSummary(restarted));
+        }
+      }
+
       if (s.outputBuffer) {
         socket.emit('terminal:data', { sessionId, data: s.outputBuffer });
       }
@@ -129,13 +181,15 @@ export function setupWebSocketHandler(io: Server): void {
 
     // ── Push branch ──────────────────────────────────────────
     socket.on('session:push', async ({ sessionId }: { sessionId: string }) => {
+      const s = getSession(sessionId);
+      if (!s || s.userId !== userId) return;
+      touchSession(sessionId);
       try {
         await pushSession(sessionId);
-        const s = getSession(sessionId);
         socket.emit('session:pushed', {
           sessionId,
-          branch: s?.branch,
-          url: `https://github.com/${s?.repoFullName}/tree/${s?.branch}`,
+          branch: s.branch,
+          url: `https://github.com/${s.repoFullName}/tree/${s.branch}`,
         });
       } catch (err: any) {
         socket.emit('session:error', { sessionId, error: err.message });
@@ -145,15 +199,32 @@ export function setupWebSocketHandler(io: Server): void {
     // ── Diff on demand ───────────────────────────────────────
     socket.on('diff:request', async ({ sessionId, file }: { sessionId: string; file: string }) => {
       const s = getSession(sessionId);
-      if (!s) return;
+      if (!s || s.userId !== userId) return;
+      touchSession(sessionId);
       const diff = await getDiff(s.worktreePath, file);
       socket.emit('diff:update', { sessionId, file, diff });
     });
 
     // ── End session ──────────────────────────────────────────
     socket.on('session:end', async ({ sessionId }: { sessionId: string }) => {
+      const s = getSession(sessionId);
+      if (!s || s.userId !== userId) return;
       await endSession(sessionId);
-      socket.emit('session:ended', { sessionId });
+      io.to(sessionId).emit('session:ended', { sessionId });
     });
   });
+
+  // ── Idle session cleanup ───────────────────────────────────
+  setInterval(() => {
+    const now = Date.now();
+    for (const summary of listSessions()) {
+      const session = getSession(summary.id);
+      if (!session) continue;
+      if (session.status === 'running' && now - session.lastActivityAt > IDLE_TIMEOUT_MS) {
+        console.log(`[cleanup] Stopping idle session ${session.id} (${session.repoFullName})`);
+        stopSession(session.id);
+        io.to(session.userId).emit('session:updated', toSummary(session));
+      }
+    }
+  }, CLEANUP_INTERVAL_MS);
 }

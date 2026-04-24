@@ -4,6 +4,8 @@ import { SocketProvider } from './hooks/useSocket';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Session from './pages/Session';
+import Worktrees from './pages/Worktrees';
+import Usage from './pages/Usage';
 import GitHubCallback from './pages/GitHubCallback';
 
 function ProtectedApp() {
@@ -15,6 +17,8 @@ function ProtectedApp() {
       <Routes>
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/session/:sessionId" element={<Session />} />
+        <Route path="/worktrees" element={<Worktrees />} />
+        <Route path="/usage" element={<Usage />} />
         <Route path="/auth/github/success" element={<GitHubCallback />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>

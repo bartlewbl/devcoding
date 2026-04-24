@@ -4,10 +4,20 @@ import { v4 as uuidv4 } from 'uuid';
 import os from 'os';
 import { cloneOrFetch, createWorktree, removeWorktree, pushBranch, getChangedFiles } from './git';
 import { OutputParser, ParsedChunk } from './parser';
-import { Session, SessionSummary } from '../types';
+import { Session, SessionSummary, ChatMessage } from '../types';
+import { recordUsage } from './usage';
+import { loadSessions } from './persistence';
 
 const OUTPUT_BUFFER_MAX = 50_000;
 const sessions = new Map<string, Session>();
+
+export function initSessions(): void {
+  const persisted = loadSessions();
+  for (const s of persisted) {
+    sessions.set(s.id, s as Session);
+  }
+  console.log(`[session] loaded ${persisted.length} persisted session(s)`);
+}
 
 export function toSummary(s: Session): SessionSummary {
   return {
@@ -19,6 +29,7 @@ export function toSummary(s: Session): SessionSummary {
     status: s.status,
     repoFullName: s.repoFullName,
     createdAt: s.createdAt,
+    lastActivityAt: s.lastActivityAt,
   };
 }
 
@@ -26,11 +37,18 @@ export function getSession(id: string): Session | undefined {
   return sessions.get(id);
 }
 
-export function listSessions(): SessionSummary[] {
-  return Array.from(sessions.values()).map(toSummary);
+export function listSessions(userId?: string): SessionSummary[] {
+  const all = Array.from(sessions.values());
+  const filtered = userId ? all.filter((s) => s.userId === userId) : all;
+  return filtered.map(toSummary);
+}
+
+export function getActiveSessionIds(): Set<string> {
+  return new Set(sessions.keys());
 }
 
 export async function createSession(
+  userId: string,
   repoUrl: string,
   repoFullName: string,
   model: 'claude' | 'kimi' | 'codex',
@@ -43,6 +61,7 @@ export async function createSession(
 
   const session: Session = {
     id,
+    userId,
     repoUrl,
     repoFullName,
     repoPath: '',
@@ -53,7 +72,9 @@ export async function createSession(
     effort,
     status: 'creating',
     createdAt: Date.now(),
+    lastActivityAt: Date.now(),
     outputBuffer: '',
+    messages: [],
   };
 
   sessions.set(id, session);
@@ -61,11 +82,60 @@ export async function createSession(
   const repoPath = await cloneOrFetch(repoUrl, repoFullName, token);
   session.repoPath = repoPath;
 
-  const worktreePath = await createWorktree(repoPath, id, branch, token, repoUrl);
+  const worktreePath = await createWorktree(repoPath, id, branch, token, repoUrl, repoFullName);
   session.worktreePath = worktreePath;
   session.status = 'ready';
 
   return session;
+}
+
+export function addMessage(id: string, message: ChatMessage): boolean {
+  const s = sessions.get(id);
+  if (!s) return false;
+  s.messages.push(message);
+  // Keep last 500 messages to avoid unbounded growth
+  if (s.messages.length > 500) {
+    s.messages = s.messages.slice(-500);
+  }
+  return true;
+}
+
+export function touchSession(id: string): boolean {
+  const s = sessions.get(id);
+  if (!s) return false;
+  s.lastActivityAt = Date.now();
+  return true;
+}
+
+export function stopSession(id: string): boolean {
+  const s = sessions.get(id);
+  if (!s || s.status !== 'running') return false;
+  s.status = 'stopped';
+  s.stoppedAt = Date.now();
+  s.pty?.kill();
+  s.watcher?.close();
+  s.pty = undefined;
+  s.watcher = undefined;
+  s.parser = undefined;
+  return true;
+}
+
+export function restartSession(
+  id: string,
+  onData: (raw: string) => void,
+  onParsed: (chunk: ParsedChunk) => void,
+  onExit: () => void,
+  onFiles: (files: string[]) => void
+): Session | undefined {
+  const s = sessions.get(id);
+  if (!s || s.status !== 'stopped') return undefined;
+  s.stoppedAt = undefined;
+  s.lastActivityAt = Date.now();
+  // Set status early so concurrent joins don't spawn duplicate PTYs
+  s.status = 'ready';
+  spawnCLI(s, onData, onParsed, onExit);
+  watchFiles(s, onFiles);
+  return s;
 }
 
 export function spawnCLI(
@@ -80,13 +150,18 @@ export function spawnCLI(
     'codex';
   const args: string[] = [];
 
-  if (session.modelName) {
+  if (session.model === 'claude') {
+    if (session.modelName) {
+      args.push('--model', session.modelName);
+    } else {
+      if (session.effort === 'high') args.push('--model', 'claude-opus-4-7');
+      else if (session.effort === 'low') args.push('--model', 'claude-haiku-4-5-20251001');
+      else args.push('--model', 'claude-sonnet-4-6');
+    }
+  } else if (session.model === 'codex' && session.modelName) {
     args.push('--model', session.modelName);
-  } else if (session.model === 'claude') {
-    if (session.effort === 'high') args.push('--model', 'claude-opus-4-7');
-    else if (session.effort === 'low') args.push('--model', 'claude-haiku-4-5-20251001');
-    else args.push('--model', 'claude-sonnet-4-6');
   }
+  // Kimi uses default_model from ~/.kimi/config.toml — passing --model breaks OAuth login
 
   // Spawn the user's login shell so it sources nvm/homebrew/etc.
   // Then upgrade the CLI and launch it — the shell's PATH will have everything.
@@ -94,7 +169,7 @@ export function spawnCLI(
   const cmdLine = args.length ? `${cmdName} ${args.join(' ')}` : cmdName;
   const brewUpgrade =
     session.model === 'claude' ? 'brew upgrade claude-code' :
-    session.model === 'kimi' ? 'uv tool upgrade kimi-cli --no-cache' :
+    session.model === 'kimi' ? 'uv tool upgrade kimi-cli' :
     'npm install -g @openai/codex';
   const fullCmd = `${brewUpgrade}; ${cmdLine}`;
 
@@ -112,7 +187,13 @@ export function spawnCLI(
     },
   });
 
-  const parser = new OutputParser(onParsed);
+  const parser = new OutputParser(
+    session.model,
+    onParsed,
+    (event) => {
+      recordUsage(session.id, session.userId, event.provider, session.modelName, event.rawLine);
+    }
+  );
   session.parser = parser;
 
   // Give the shell ~800ms to source its profile, then upgrade + launch the CLI
@@ -126,6 +207,7 @@ export function spawnCLI(
   });
 
   proc.onExit(() => {
+    if (session.status === 'stopped' || session.status === 'ended') return;
     session.status = 'ended';
     onExit();
   });
@@ -161,14 +243,14 @@ export async function endSession(id: string): Promise<void> {
   const s = sessions.get(id);
   if (!s) return;
 
+  s.status = 'ended';
+  s.stoppedAt = Date.now();
   s.pty?.kill();
   await s.watcher?.close();
 
   if (s.repoPath && s.worktreePath) {
-    await removeWorktree(s.repoPath, s.worktreePath).catch(() => null);
+    await removeWorktree(s.repoPath, s.worktreePath, s.id).catch(() => null);
   }
-
-  s.status = 'ended';
 }
 
 export function updateSessionConfig(

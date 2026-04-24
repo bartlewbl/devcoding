@@ -1,12 +1,15 @@
+export * from './usage';
+
 export interface SessionSummary {
   id: string;
   branch: string;
   model: 'claude' | 'kimi' | 'codex';
   modelName?: string;
   effort: string;
-  status: 'creating' | 'ready' | 'running' | 'ended';
+  status: 'creating' | 'ready' | 'running' | 'stopped' | 'ended';
   repoFullName: string;
   createdAt: number;
+  lastActivityAt: number;
 }
 
 export interface ChatMessage {
@@ -26,4 +29,15 @@ export interface GithubRepo {
   private: boolean;
   description: string | null;
   default_branch: string;
+}
+
+export interface WorktreeStatus {
+  sessionId: string;
+  repoFullName: string;
+  branch: string;
+  worktreePath: string;
+  createdAt: number;
+  exists: boolean;
+  isOrphaned: boolean;
+  sizeBytes?: number;
 }
