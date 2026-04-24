@@ -1,0 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  background: #0a0a0a;
+}
+
+/* xterm overrides */
+.xterm {
+  height: 100%;
+  padding: 8px 12px;
+}
+.xterm-viewport {
+  overflow-y: auto !important;
+}
+
+/* diff2html dark theme fix */
+.d2h-wrapper {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+}
+.d2h-file-header { background: #1a1a1a !important; border-color: #2a2a2a !important; }
+.d2h-code-linenumber, .d2h-code-side-linenumber { background: #111 !important; color: #555 !important; border-color: #222 !important; }
+.d2h-ins { background: #0d2a1a !important; }
+.d2h-del { background: #2a0d0d !important; }
+.d2h-ins .d2h-code-line-ctn { background: #163d24 !important; color: #7ec89a !important; }
+.d2h-del .d2h-code-line-ctn { background: #3d1616 !important; color: #c87e7e !important; }
+.d2h-code-line-ctn, .d2h-code-side-line { background: #0f0f0f !important; color: #d4d4d4 !important; }
+.d2h-file-wrapper { border-color: #2a2a2a !important; }
