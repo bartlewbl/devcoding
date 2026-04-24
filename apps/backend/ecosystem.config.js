@@ -3,7 +3,7 @@ module.exports = {
     {
       name: 'ai-code-studio-backend',
       script: './dist/index.js',
-      cwd: '/var/www/ai-code-studio/apps/backend',
+      cwd: '/root/devcoding/apps/backend',
       instances: 1,
       autorestart: true,
       watch: false,

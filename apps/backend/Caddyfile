@@ -1,16 +1,8 @@
-# Replace YOUR_DOMAIN.COM with your actual domain, then:
-#   sudo cp Caddyfile /etc/caddy/Caddyfile
-#   sudo systemctl reload caddy
+code.bartlew.com {
+	reverse_proxy /api/* localhost:3001
+	reverse_proxy /socket.io/* localhost:3001
 
-YOUR_DOMAIN.COM {
-	# Health check / API routes → Node backend
-	reverse_proxy localhost:3001
-
-	# Optional: serve frontend static files from the same domain
-	# (uncomment if you want everything on Hetzner instead of Vercel)
-	# handle {
-	# 	root * /var/www/ai-code-studio/apps/frontend/dist
-	# 	try_files {path} /index.html
-	# 	file_server
-	# }
+	root * /root/devcoding/apps/frontend/dist
+	try_files {path} /index.html
+	file_server
 }
