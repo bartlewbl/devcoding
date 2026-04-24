@@ -9,7 +9,8 @@ export interface Session {
   repoPath: string;
   worktreePath: string;
   branch: string;
-  model: 'claude' | 'kimi';
+  model: 'claude' | 'kimi' | 'codex';
+  modelName?: string;
   effort: 'low' | 'medium' | 'high';
   status: 'creating' | 'ready' | 'running' | 'ended';
   createdAt: number;
@@ -22,7 +23,8 @@ export interface Session {
 export interface SessionSummary {
   id: string;
   branch: string;
-  model: 'claude' | 'kimi';
+  model: 'claude' | 'kimi' | 'codex';
+  modelName?: string;
   effort: string;
   status: Session['status'];
   repoFullName: string;

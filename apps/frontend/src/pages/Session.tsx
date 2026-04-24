@@ -1,15 +1,23 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { GitBranch, Upload, Square, ArrowLeft, TerminalSquare, MessageSquare } from 'lucide-react';
+import { GitBranch, Upload, Square, ArrowLeft, TerminalSquare, MessageSquare, Zap, Clock, CheckCircle, XCircle } from 'lucide-react';
 import { useSocket } from '../hooks/useSocket';
 import Terminal from '../components/Terminal';
 import ChatPanel from '../components/ChatPanel';
 import FileTree from '../components/FileTree';
 import DiffViewer from '../components/DiffViewer';
+import NewSessionModal from '../components/NewSessionModal';
 import { SessionSummary } from '../types';
 import api from '../lib/api';
 
 type Tab = 'chat' | 'terminal';
+
+const STATUS_ICON = {
+  creating: <Clock size={12} className="text-yellow-500 shrink-0" />,
+  ready: <CheckCircle size={12} className="text-green-500 shrink-0" />,
+  running: <Zap size={12} className="text-blue-400 shrink-0" />,
+  ended: <XCircle size={12} className="text-zinc-600 shrink-0" />,
+};
 
 export default function Session() {
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -17,6 +25,7 @@ export default function Session() {
   const navigate = useNavigate();
 
   const [session, setSession] = useState<SessionSummary | null>(null);
+  const [allSessions, setAllSessions] = useState<SessionSummary[]>([]);
   const [tab, setTab] = useState<Tab>('chat');
   const [files, setFiles] = useState<string[]>([]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
@@ -24,6 +33,7 @@ export default function Session() {
   const [pushing, setPushing] = useState(false);
   const [pushUrl, setPushUrl] = useState<string | null>(null);
   const [spawnError, setSpawnError] = useState<string | null>(null);
+  const [showNew, setShowNew] = useState(false);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -31,6 +41,24 @@ export default function Session() {
       .then((r) => setSession(r.data))
       .catch(() => navigate('/dashboard'));
   }, [sessionId, navigate]);
+
+  useEffect(() => {
+    api.get<SessionSummary[]>('/sessions').then((r) => setAllSessions(r.data));
+  }, []);
+
+  useEffect(() => {
+    if (!socket) return;
+
+    socket.on('sessions:list', (list: SessionSummary[]) => setAllSessions(list));
+    socket.on('session:created', (s: SessionSummary) => {
+      setAllSessions((prev) => [...prev.filter((x) => x.id !== s.id), s]);
+    });
+
+    return () => {
+      socket.off('sessions:list');
+      socket.off('session:created');
+    };
+  }, [socket]);
 
   useEffect(() => {
     if (!socket || !sessionId) return;
@@ -49,6 +77,10 @@ export default function Session() {
 
     socket.on('session:ended', ({ sessionId: sid }: { sessionId: string }) => {
       if (sid === sessionId) setSession((s) => s ? { ...s, status: 'ended' } : s);
+    });
+
+    socket.on('session:updated', (summary: SessionSummary) => {
+      if (summary.id === sessionId) setSession(summary);
     });
 
     socket.on('session:error', ({ sessionId: sid, error }: { sessionId?: string; error: string }) => {
@@ -94,7 +126,7 @@ export default function Session() {
     <div className="h-screen bg-zinc-950 text-zinc-100 flex flex-col">
       {spawnError && (
         <div className="bg-red-950 border-b border-red-800 text-red-300 text-xs px-4 py-2">
-          CLI error: {spawnError} — check backend logs and make sure <code className="font-mono">claude</code> / <code className="font-mono">kimi</code> is installed and accessible.
+          CLI error: {spawnError} — check backend logs and make sure <code className="font-mono">claude</code> / <code className="font-mono">kimi</code> / <code className="font-mono">codex</code> is installed and accessible.
         </div>
       )}
       {/* Header */}
@@ -107,6 +139,9 @@ export default function Session() {
         <span className="text-zinc-700 text-xs">·</span>
         <span className="text-xs text-zinc-500">{session.repoFullName}</span>
         <span className="text-xs text-zinc-700 capitalize ml-1">{session.model}</span>
+        {session.modelName && (
+          <span className="text-xs text-zinc-600 ml-1">({session.modelName})</span>
+        )}
 
         <div className="ml-auto flex items-center gap-2">
           {pushUrl ? (
@@ -135,6 +170,70 @@ export default function Session() {
 
       {/* Body */}
       <div className="flex flex-1 min-h-0">
+        {/* Left sidebar: sessions */}
+        <div className="w-64 border-r border-zinc-900 flex flex-col shrink-0 bg-zinc-950">
+          <div className="px-4 py-3 border-b border-zinc-900 flex items-center justify-between">
+            <span className="text-xs text-zinc-500 uppercase tracking-wider">Sessions</span>
+            <button
+              onClick={() => setShowNew(true)}
+              className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+            >
+              + New
+            </button>
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto py-2">
+            {allSessions.length === 0 ? (
+              <div className="px-4 py-6 text-xs text-zinc-600 text-center">No sessions</div>
+            ) : (
+              <div className="space-y-4">
+                {Object.entries(
+                  allSessions.reduce<Record<string, SessionSummary[]>>((acc, s) => {
+                    (acc[s.repoFullName] ||= []).push(s);
+                    return acc;
+                  }, {})
+                )
+                  .sort(([a], [b]) => a.localeCompare(b))
+                  .map(([repo, repoSessions]) => (
+                    <div key={repo}>
+                      <div className="px-3 py-1 text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">
+                        {repo}
+                      </div>
+                      <div className="space-y-1 px-2">
+                        {repoSessions
+                          .sort((a, b) => b.createdAt - a.createdAt)
+                          .map((s) => {
+                            const isActive = s.id === sessionId;
+                            return (
+                              <button
+                                key={s.id}
+                                onClick={() => navigate(`/session/${s.id}`)}
+                                className={`w-full text-left rounded-lg px-3 py-2 transition-colors ${
+                                  isActive
+                                    ? 'bg-zinc-800 border border-zinc-700'
+                                    : 'hover:bg-zinc-900 border border-transparent'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2 mb-1">
+                                  {STATUS_ICON[s.status]}
+                                  <span className={`text-xs capitalize ${isActive ? 'text-zinc-200' : 'text-zinc-400'}`}>
+                                    {s.status}
+                                  </span>
+                                  <span className="ml-auto text-[10px] text-zinc-600">{s.modelName || s.model}</span>
+                                </div>
+                                <div className={`font-mono text-xs truncate ${isActive ? 'text-zinc-100' : 'text-zinc-300'}`}>
+                                  {s.branch}
+                                </div>
+                              </button>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* Main area */}
         <div className="flex flex-col flex-1 min-w-0">
           {/* Tabs */}
@@ -185,6 +284,13 @@ export default function Session() {
           )}
         </div>
       </div>
+
+      {showNew && (
+        <NewSessionModal
+          socket={socket}
+          onClose={() => setShowNew(false)}
+        />
+      )}
     </div>
   );
 }

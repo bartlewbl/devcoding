@@ -9,6 +9,7 @@ import {
   watchFiles,
   endSession,
   pushSession,
+  updateSessionConfig,
 } from '../services/session';
 import { getDiff } from '../services/git';
 import { githubTokens } from '../routes/github';
@@ -34,7 +35,7 @@ export function setupWebSocketHandler(io: Server): void {
     socket.emit('sessions:list', listSessions());
 
     // ── Create session ──────────────────────────────────────
-    socket.on('session:create', async ({ repoUrl, repoFullName, model, effort }) => {
+    socket.on('session:create', async ({ repoUrl, repoFullName, model, effort, modelName }) => {
       const token = githubTokens.get(userId);
       if (!token) {
         socket.emit('session:error', { error: 'GitHub not connected' });
@@ -43,12 +44,13 @@ export function setupWebSocketHandler(io: Server): void {
 
       try {
         socket.emit('session:status', { status: 'cloning', message: 'Cloning repository…' });
-        const session = await createSession(repoUrl, repoFullName, model, effort, token);
+        const session = await createSession(repoUrl, repoFullName, model, effort, token, modelName);
 
         socket.emit('session:created', {
           id: session.id,
           branch: session.branch,
           model: session.model,
+          modelName: session.modelName,
           effort: session.effort,
           status: session.status,
           repoFullName: session.repoFullName,
@@ -94,6 +96,26 @@ export function setupWebSocketHandler(io: Server): void {
     // ── Chat input → PTY ─────────────────────────────────────
     socket.on('session:chat', ({ sessionId, message }: { sessionId: string; message: string }) => {
       getSession(sessionId)?.pty?.write(message + '\r');
+    });
+
+    // ── Update session config (provider / model / effort) ─────
+    socket.on('session:update-config', ({ sessionId, model, modelName, effort }: { sessionId: string; model?: 'claude' | 'kimi' | 'codex'; modelName?: string; effort?: 'low' | 'medium' | 'high' }) => {
+      const s = getSession(sessionId);
+      if (!s) return;
+
+      const oldModelName = s.modelName;
+      const oldModel = s.model;
+      const summary = updateSessionConfig(sessionId, { model, modelName, effort });
+      if (!summary) return;
+
+      // If the model changed and a PTY is active, try to send the CLI command to switch model
+      if (s.pty && modelName && (modelName !== oldModelName || model !== oldModel)) {
+        if (s.model === 'claude' || s.model === 'kimi' || s.model === 'codex') {
+          s.pty.write(`/model ${modelName}\r`);
+        }
+      }
+
+      io.emit('session:updated', summary);
     });
 
     // ── Reconnect: replay terminal buffer ────────────────────

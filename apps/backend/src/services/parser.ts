@@ -6,7 +6,7 @@ export interface ParsedChunk {
   toolName?: string;
 }
 
-// ── ANSI helpers (only used for startup detection) ────────────────────────────
+// ── ANSI helpers ──────────────────────────────────────────────────────────────
 function preprocess(raw: string): string {
   return raw.replace(/\x1b\[(\d*)C/g, (_, n) => ' '.repeat(Math.min(parseInt(n || '1', 10), 40)));
 }
@@ -21,7 +21,14 @@ function stripAnsi(s: string): string {
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '');
 }
 
-// ── Noise patterns ─────────────────────────────────────────────────────────────
+// Strip combining strikethrough / overlay characters that terminals use when
+// overwriting lines. These leak through xterm.js translateToString().
+const STRIKE_CHARS = /[\u0336\u0337\u0338\u0335\u0334\u0332\u0333]/gu;
+function stripStrikethrough(s: string): string {
+  return s.replace(STRIKE_CHARS, '');
+}
+
+// ── Noise patterns ────────────────────────────────────────────────────────────
 const NOISE: RegExp[] = [
   /\(thinking\)/,
   /^Thinking[.\s]*/i,
@@ -42,13 +49,40 @@ const NOISE: RegExp[] = [
   /ctrl\+o to expand/i,
   /^\s*\(ctrl\+/i,
   /^[✶✻✽✢✳⏺·⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s*$/u,
+  // Cost / usage tracking noise from claude-code
+  /^Now usi/i,
+  /extra usage/i,
+  /^(?:Now )?using\s+(?:extra\s+)?usage/i,
+  /^[\d,]+\s*\$?\d+\.\d+\s*(?:USD|tokens?|input|output)/i,
+  /claude-code\s*$/i,
+  /anthropic\s*cost/i,
+  // Prompt / input noise
+  /^What would you like to work on/i,
+  /^Forming[.…]*/i,
+  /^\s*[›>]\s*$/,                 // lone arrows
+  /^\s*[─━═\-─_]+\s*$/,           // lines of only dashes/box drawing
 ];
 
 function isNoise(t: string): boolean {
   return NOISE.some(p => p.test(t));
 }
 
-// ── Tool call detection ────────────────────────────────────────────────────────
+// ── Garbage detection ─────────────────────────────────────────────────────────
+// Reject lines that are mostly special characters (overwritten terminal garbage)
+function isGarbage(t: string): boolean {
+  if (!t) return true;
+  const visible = t.replace(/\s/g, '');
+  if (!visible) return true;
+  const alnum = visible.replace(/[^a-zA-Z0-9]/g, '').length;
+  const ratio = alnum / visible.length;
+  // If less than 25% alphanumeric and line is short, it's likely garbage
+  if (ratio < 0.25 && visible.length < 60) return true;
+  // If less than 15% alphanumeric at any length, it's garbage
+  if (ratio < 0.15) return true;
+  return false;
+}
+
+// ── Tool call detection ───────────────────────────────────────────────────────
 const TOOL_PREFIXES = [
   'Read', 'Write', 'Edit', 'Create', 'Delete', 'Bash', 'Search', 'Grep',
   'Glob', 'List', 'View', 'Run', 'Fetch', 'Call', 'Todo',
@@ -58,23 +92,24 @@ const TOOL_PREFIXES = [
 const TOOL_RE = new RegExp(`^(${TOOL_PREFIXES.join('|')})`, 'i');
 const ARROW_RE = /[›>⟩]\s*$/;
 
-function isToolCall(t: string) { return ARROW_RE.test(t) && TOOL_RE.test(t); }
+function isToolCall(t: string) {
+  if (!ARROW_RE.test(t) || !TOOL_RE.test(t)) return false;
+  return true;
+}
 function toolName(t: string) { return t.replace(ARROW_RE, '').trim().split(/\s+/).slice(0, 4).join(' '); }
 
 const SUMMARY_RE = /^(Read|Listed|Searched|Ran|Wrote|Created|Edited|Fetched)\s+\d+/i;
 function isToolSummary(t: string) { return SUMMARY_RE.test(t); }
 
-// ── Parser (headless terminal approach) ────────────────────────────────────────
-// Instead of manually parsing escape sequences, we feed raw PTY data into a
-// proper VT100 terminal emulator. After a quiet period (400 ms of no new data),
-// we read the settled screen buffer line by line. This correctly handles
-// cursor-up/down animations that previously garbled the stream parser.
+// ── Parser (headless terminal approach) ───────────────────────────────────────
 export class OutputParser {
   private term: Terminal;
-  private lastProcessedLine = 0;
   private debounce: ReturnType<typeof setTimeout> | null = null;
   private phase: 'startup' | 'ready' = 'startup';
   private startupBuf = '';
+  // Sliding-window extraction state
+  private seenHashes = new Set<string>();
+  private lastCursorY = 0;
 
   constructor(private readonly onParsed: (chunk: ParsedChunk) => void) {
     this.term = new Terminal({
@@ -93,9 +128,8 @@ export class OutputParser {
       if (this.startupBuf.includes('for shortcuts') || this.startupBuf.length > 10000) {
         this.phase = 'ready';
         this.startupBuf = '';
-        // Capture buffer length after xterm processes the write (~100 ms)
         setTimeout(() => {
-          this.lastProcessedLine = this.term.buffer.active.length;
+          this.lastCursorY = this.term.buffer.active.cursorY;
           this.onParsed({ type: 'system', content: 'Session ready' });
         }, 100);
       }
@@ -110,18 +144,38 @@ export class OutputParser {
   private extract(): void {
     const buf = this.term.buffer.active;
     const total = buf.length;
-    if (total <= this.lastProcessedLine) return;
+    const cursorY = buf.baseY + buf.cursorY;
 
-    const lines: string[] = [];
-    for (let i = this.lastProcessedLine; i < total; i++) {
-      lines.push((buf.getLine(i)?.translateToString(true) ?? '').trimEnd());
+    // Sliding window: read the last N lines up to the cursor.
+    // We never read more than 80 lines (2 screens) in one go to avoid
+    // ingesting ancient scrollback that may contain stale overwritten text.
+    const WINDOW = 80;
+    const start = Math.max(0, Math.min(total - WINDOW, cursorY - WINDOW + 20));
+    const end = Math.min(total, cursorY + 5);
+
+    if (start >= end) return;
+
+    const freshLines: string[] = [];
+    for (let i = start; i < end; i++) {
+      const rawLine = (buf.getLine(i)?.translateToString(true) ?? '').trimEnd();
+      const clean = stripStrikethrough(rawLine).trim();
+      if (!clean) continue;
+
+      // Deduplicate within sliding window using a simple hash
+      const hash = clean.slice(0, 120);
+      if (this.seenHashes.has(hash)) continue;
+      this.seenHashes.add(hash);
+
+      freshLines.push(clean);
     }
 
-    // Drop trailing blank lines (e.g. empty screen rows below cursor)
-    while (lines.length && !lines[lines.length - 1]) lines.pop();
+    // Prune seen-hash set so it doesn't grow forever
+    if (this.seenHashes.size > 500) {
+      const keep = Array.from(this.seenHashes).slice(-300);
+      this.seenHashes = new Set(keep);
+    }
 
-    this.lastProcessedLine = total;
-    if (!lines.length) return;
+    if (!freshLines.length) return;
 
     let textBuf = '';
     const flush = () => {
@@ -131,10 +185,9 @@ export class OutputParser {
       }
     };
 
-    for (const raw of lines) {
-      const t = raw.trim();
-      if (!t) { flush(); continue; }
+    for (const t of freshLines) {
       if (isNoise(t)) continue;
+      if (isGarbage(t)) continue;
 
       if (isToolCall(t)) {
         flush();
@@ -148,5 +201,7 @@ export class OutputParser {
       }
     }
     flush();
+
+    this.lastCursorY = cursorY;
   }
 }

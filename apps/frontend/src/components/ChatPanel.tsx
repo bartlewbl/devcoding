@@ -1,12 +1,31 @@
-import { useEffect, useRef, useState, KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, KeyboardEvent, useMemo } from 'react';
 import { Socket } from 'socket.io-client';
 import { Send } from 'lucide-react';
-import ChatMessage from './ChatMessage';
 import { ChatMessage as Msg } from '../types';
+import UserTurn from './UserTurn';
+import AssistantTurn from './AssistantTurn';
 
 interface Props {
   sessionId: string;
   socket: Socket;
+}
+
+export type Turn =
+  | { role: 'user'; messages: Msg[] }
+  | { role: 'assistant'; messages: Msg[] };
+
+function groupIntoTurns(msgs: Msg[]): Turn[] {
+  const turns: Turn[] = [];
+  for (const msg of msgs) {
+    const last = turns[turns.length - 1];
+    const role = msg.type === 'user' ? 'user' : 'assistant';
+    if (last && last.role === role) {
+      last.messages.push(msg);
+    } else {
+      turns.push({ role, messages: [msg] });
+    }
+  }
+  return turns;
 }
 
 export default function ChatPanel({ sessionId, socket }: Props) {
@@ -44,13 +63,23 @@ export default function ChatPanel({ sessionId, socket }: Props) {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   };
 
+  const turns = useMemo(() => groupIntoTurns(messages), [messages]);
+
   return (
     <div className="flex flex-col h-full bg-zinc-950">
-      <div className="flex-1 overflow-y-auto px-6 py-5 space-y-3 min-h-0">
+      <div className="flex-1 overflow-y-auto px-4 py-5 min-h-0">
         {messages.length === 0 && (
           <p className="text-zinc-700 text-sm">Session started. Type a message to begin.</p>
         )}
-        {messages.map((msg) => <ChatMessage key={msg.id} message={msg} />)}
+        <div className="space-y-6">
+          {turns.map((turn, i) =>
+            turn.role === 'user' ? (
+              <UserTurn key={i} messages={turn.messages} />
+            ) : (
+              <AssistantTurn key={i} messages={turn.messages} />
+            )
+          )}
+        </div>
         <div ref={bottomRef} />
       </div>
 

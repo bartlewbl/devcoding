@@ -14,6 +14,7 @@ export function toSummary(s: Session): SessionSummary {
     id: s.id,
     branch: s.branch,
     model: s.model,
+    modelName: s.modelName,
     effort: s.effort,
     status: s.status,
     repoFullName: s.repoFullName,
@@ -32,9 +33,10 @@ export function listSessions(): SessionSummary[] {
 export async function createSession(
   repoUrl: string,
   repoFullName: string,
-  model: 'claude' | 'kimi',
+  model: 'claude' | 'kimi' | 'codex',
   effort: 'low' | 'medium' | 'high',
-  token: string
+  token: string,
+  modelName?: string
 ): Promise<Session> {
   const id = uuidv4();
   const branch = `ai/${model}-${Date.now()}`;
@@ -47,6 +49,7 @@ export async function createSession(
     worktreePath: '',
     branch,
     model,
+    modelName,
     effort,
     status: 'creating',
     createdAt: Date.now(),
@@ -71,21 +74,31 @@ export function spawnCLI(
   onParsed: (chunk: ParsedChunk) => void,
   onExit: () => void
 ): void {
-  const cmdName = session.model === 'claude' ? 'claude' : 'kimi';
+  const cmdName =
+    session.model === 'claude' ? 'claude' :
+    session.model === 'kimi' ? 'kimi' :
+    'codex';
   const args: string[] = [];
 
-  if (session.model === 'claude') {
+  if (session.modelName) {
+    args.push('--model', session.modelName);
+  } else if (session.model === 'claude') {
     if (session.effort === 'high') args.push('--model', 'claude-opus-4-7');
     else if (session.effort === 'low') args.push('--model', 'claude-haiku-4-5-20251001');
     else args.push('--model', 'claude-sonnet-4-6');
   }
 
   // Spawn the user's login shell so it sources nvm/homebrew/etc.
-  // Then type the CLI command into it — the shell's PATH will have everything.
-  const shell = process.env.SHELL || '/bin/zsh';
+  // Then upgrade the CLI and launch it — the shell's PATH will have everything.
+  const shell = process.env.SHELL || '/bin/bash';
   const cmdLine = args.length ? `${cmdName} ${args.join(' ')}` : cmdName;
+  const brewUpgrade =
+    session.model === 'claude' ? 'brew upgrade claude-code' :
+    session.model === 'kimi' ? 'uv tool upgrade kimi-cli --no-cache' :
+    'npm install -g @openai/codex';
+  const fullCmd = `${brewUpgrade}; ${cmdLine}`;
 
-  console.log(`[PTY] spawning shell ${shell} → will run: ${cmdLine} in ${session.worktreePath}`);
+  console.log(`[PTY] spawning shell ${shell} → will run: ${fullCmd} in ${session.worktreePath}`);
 
   const proc = ptyLib.spawn(shell, ['-l', '-i'], {
     name: 'xterm-256color',
@@ -102,8 +115,8 @@ export function spawnCLI(
   const parser = new OutputParser(onParsed);
   session.parser = parser;
 
-  // Give the shell ~800ms to source its profile, then launch the CLI
-  setTimeout(() => proc.write(cmdLine + '\r'), 800);
+  // Give the shell ~800ms to source its profile, then upgrade + launch the CLI
+  setTimeout(() => proc.write(fullCmd + '\r'), 800);
 
   proc.onData((data: string) => {
     // Keep a rolling buffer for terminal replay on reconnect
@@ -156,6 +169,18 @@ export async function endSession(id: string): Promise<void> {
   }
 
   s.status = 'ended';
+}
+
+export function updateSessionConfig(
+  id: string,
+  updates: Partial<Pick<Session, 'model' | 'modelName' | 'effort'>>
+): SessionSummary | undefined {
+  const s = sessions.get(id);
+  if (!s) return undefined;
+  if (updates.model !== undefined) s.model = updates.model;
+  if (updates.modelName !== undefined) s.modelName = updates.modelName;
+  if (updates.effort !== undefined) s.effort = updates.effort;
+  return toSummary(s);
 }
 
 export async function pushSession(id: string): Promise<void> {

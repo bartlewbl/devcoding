@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: ai-code-studio-backend
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      - key: FRONTEND_URL
+        sync: false
+        description: Set this to your Vercel frontend URL (e.g. https://ai-code-studio.vercel.app)
+      - key: BACKEND_URL
+        sync: false
+        description: Set this to your Render backend URL (e.g. https://ai-code-studio-backend.onrender.com)
+      - key: JWT_SECRET
+        generateValue: true
+      - key: GITHUB_CLIENT_ID
+        sync: false
+      - key: GITHUB_CLIENT_SECRET
+        sync: false
+      - key: ADMIN_USERNAME
+        value: admin
+      - key: ADMIN_PASSWORD
+        generateValue: true

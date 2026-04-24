@@ -1,7 +1,8 @@
 export interface SessionSummary {
   id: string;
   branch: string;
-  model: 'claude' | 'kimi';
+  model: 'claude' | 'kimi' | 'codex';
+  modelName?: string;
   effort: string;
   status: 'creating' | 'ready' | 'running' | 'ended';
   repoFullName: string;

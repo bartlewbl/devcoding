@@ -17,6 +17,20 @@ html, body, #root {
   overflow-y: auto !important;
 }
 
+/* Chat message typography tweaks */
+.prose pre {
+  margin: 0 !important;
+}
+.prose code {
+  font-weight: 400 !important;
+}
+.prose strong {
+  color: #e4e4e7;
+}
+.prose em {
+  color: #a1a1aa;
+}
+
 /* diff2html dark theme fix */
 .d2h-wrapper {
   font-family: 'JetBrains Mono', monospace;
