@@ -170,95 +170,100 @@ export default function Session() {
   }
 
   return (
-    <div className="h-screen bg-zinc-950 text-zinc-100 flex flex-col">
+    <div className="h-dvh md:h-screen bg-zinc-950 text-zinc-100 flex flex-col overflow-hidden">
       {sessionError && (
         <div className="bg-red-950 border-b border-red-800 text-red-300 text-xs px-4 py-2">
           Error: {sessionError}
         </div>
       )}
       {/* Header */}
-      <header className="border-b border-zinc-900 px-3 py-2 md:px-4 md:py-3 flex items-center gap-2 md:gap-3 shrink-0 flex-wrap">
-        <Link to="/dashboard" className="text-zinc-500 hover:text-zinc-300 transition-colors shrink-0">
-          <ArrowLeft size={16} />
-        </Link>
+      <header className="border-b border-zinc-900 px-3 py-2 md:px-4 md:py-3 shrink-0">
+        {/* Top row — always visible */}
+        <div className="flex items-center gap-2 md:gap-3">
+          <Link to="/dashboard" className="flex items-center justify-center h-9 w-9 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors shrink-0">
+            <ArrowLeft size={18} />
+          </Link>
 
-        {/* Mobile sidebar toggles */}
-        <button
-          onClick={() => setShowMobileLeft(!showMobileLeft)}
-          className="md:hidden flex items-center gap-1 text-xs bg-zinc-800 hover:bg-zinc-700 rounded-lg px-2 py-1.5 transition-colors shrink-0"
-          title="Sessions"
-        >
-          <Menu size={14} />
-          <span className="text-zinc-400">Sessions</span>
-        </button>
+          {/* Mobile sidebar toggles */}
+          <button
+            onClick={() => setShowMobileLeft(!showMobileLeft)}
+            className={`md:hidden flex items-center justify-center gap-1.5 h-9 px-3 rounded-lg text-xs font-medium transition-colors shrink-0 ${showMobileLeft ? 'bg-zinc-700 text-zinc-100' : 'bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'}`}
+            title="Sessions"
+          >
+            <Menu size={16} />
+            <span>Sessions</span>
+          </button>
 
-        <GitBranch size={14} className="text-zinc-500 hidden sm:block shrink-0" />
-        <span className="font-mono text-sm text-zinc-300 truncate max-w-[120px] sm:max-w-none">{session.branch}</span>
-        <span className="text-zinc-700 text-xs hidden md:inline">·</span>
-        <span className="text-xs text-zinc-500 hidden md:inline">{session.repoFullName}</span>
-        <span className="text-xs text-zinc-700 capitalize hidden lg:inline ml-1">{session.model}</span>
-        {session.modelName && (
-          <span className="text-xs text-zinc-600 hidden lg:inline ml-1">({session.modelName})</span>
-        )}
+          <GitBranch size={14} className="text-zinc-500 hidden sm:block shrink-0" />
+          <span className="font-mono text-sm text-zinc-300 truncate min-w-0">{session.branch}</span>
 
-        <div className="ml-auto flex items-center gap-2 flex-wrap">
-          {pushUrl && <a href={pushUrl} target="_blank" rel="noreferrer" className="text-xs text-green-400 hover:text-green-300 underline">Branch pushed ↗</a>}
-          {prUrl && <a href={prUrl} target="_blank" rel="noreferrer" className="text-xs text-green-400 hover:text-green-300 underline">PR created ↗</a>}
-          {mergedToMain && <span className="text-xs text-green-400">Merged to main ✓</span>}
-
-          <div className="relative" ref={menuRef}>
+          <div className="ml-auto flex items-center gap-2">
+            {/* Mobile files toggle */}
             <button
-              onClick={() => setShowMenu(!showMenu)}
-              disabled={actionInProgress !== null || session.status === 'creating'}
-              className="flex items-center gap-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 rounded-lg px-3 py-1.5 transition-colors disabled:opacity-40 shrink-0"
+              onClick={() => setShowMobileRight(!showMobileRight)}
+              className={`md:hidden flex items-center justify-center gap-1.5 h-9 px-3 rounded-lg text-xs font-medium transition-colors shrink-0 ${showMobileRight ? 'bg-zinc-700 text-zinc-100' : 'bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'}`}
+              title="Files"
             >
-              <Upload size={12} />
-              <span className="hidden sm:inline">
-                {actionInProgress === 'push' ? 'Pushing…' : actionInProgress === 'pr' ? 'Creating PR…' : actionInProgress === 'merge' ? 'Merging…' : 'Git Actions'}
-              </span>
-              <ChevronDown size={12} />
+              <FileCode size={16} />
+              <span>Files</span>
             </button>
 
-            {showMenu && (
-              <div className="absolute right-0 mt-1 bg-zinc-800 border border-zinc-700 rounded-lg shadow-lg z-50 min-w-48">
-                <button
-                  onClick={pushBranch}
-                  className="w-full text-left px-4 py-2 text-xs text-zinc-100 hover:bg-zinc-700 flex items-center gap-2 first:rounded-t-lg"
-                >
-                  <Upload size={12} /> Push Branch
-                </button>
-                <button
-                  onClick={createPR}
-                  className="w-full text-left px-4 py-2 text-xs text-zinc-100 hover:bg-zinc-700 flex items-center gap-2"
-                >
-                  <GitPullRequest size={12} /> Create PR
-                </button>
-                <button
-                  onClick={mergeToMain}
-                  className="w-full text-left px-4 py-2 text-xs text-zinc-100 hover:bg-zinc-700 flex items-center gap-2 last:rounded-b-lg"
-                >
-                  <GitMerge size={12} /> Push to Main
-                </button>
-              </div>
-            )}
+            <div className="relative" ref={menuRef}>
+              <button
+                onClick={() => setShowMenu(!showMenu)}
+                disabled={actionInProgress !== null || session.status === 'creating'}
+                className="flex items-center justify-center h-9 px-3 gap-1.5 text-xs bg-zinc-900 hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-40 shrink-0"
+              >
+                <Upload size={14} />
+                <span className="hidden sm:inline">
+                  {actionInProgress === 'push' ? 'Pushing…' : actionInProgress === 'pr' ? 'Creating PR…' : actionInProgress === 'merge' ? 'Merging…' : 'Git Actions'}
+                </span>
+                <ChevronDown size={14} />
+              </button>
+
+              {showMenu && (
+                <div className="absolute right-0 mt-1 bg-zinc-800 border border-zinc-700 rounded-lg shadow-lg z-50 min-w-48">
+                  <button
+                    onClick={pushBranch}
+                    className="w-full text-left px-4 py-2 text-xs text-zinc-100 hover:bg-zinc-700 flex items-center gap-2 first:rounded-t-lg"
+                  >
+                    <Upload size={12} /> Push Branch
+                  </button>
+                  <button
+                    onClick={createPR}
+                    className="w-full text-left px-4 py-2 text-xs text-zinc-100 hover:bg-zinc-700 flex items-center gap-2"
+                  >
+                    <GitPullRequest size={12} /> Create PR
+                  </button>
+                  <button
+                    onClick={mergeToMain}
+                    className="w-full text-left px-4 py-2 text-xs text-zinc-100 hover:bg-zinc-700 flex items-center gap-2 last:rounded-b-lg"
+                  >
+                    <GitMerge size={12} /> Push to Main
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={endSession}
+              className="flex items-center justify-center h-9 w-9 rounded-lg bg-zinc-900 text-zinc-500 hover:text-red-400 hover:bg-red-950/30 transition-colors shrink-0"
+              title="End session"
+            >
+              <Square size={16} />
+            </button>
           </div>
+        </div>
 
-          <button
-            onClick={endSession}
-            className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-red-400 transition-colors px-2 py-1.5 shrink-0"
-          >
-            <Square size={12} /> <span className="hidden sm:inline">End</span>
-          </button>
-
-          {/* Mobile files toggle */}
-          <button
-            onClick={() => setShowMobileRight(!showMobileRight)}
-            className="md:hidden flex items-center gap-1 text-xs bg-zinc-800 hover:bg-zinc-700 rounded-lg px-2 py-1.5 transition-colors shrink-0"
-            title="Files"
-          >
-            <FileCode size={14} />
-            <span className="text-zinc-400">Files</span>
-          </button>
+        {/* Second row — meta info + status badges */}
+        <div className="mt-1.5 flex items-center gap-2 text-[11px] text-zinc-500 flex-wrap">
+          <span className="hidden md:inline">{session.repoFullName}</span>
+          <span className="hidden md:inline text-zinc-700">·</span>
+          <span className="capitalize">{session.model}</span>
+          {session.modelName && <span>({session.modelName})</span>}
+          {pushUrl && <a href={pushUrl} target="_blank" rel="noreferrer" className="text-green-400 hover:text-green-300 underline">Branch pushed ↗</a>}
+          {prUrl && <a href={prUrl} target="_blank" rel="noreferrer" className="text-green-400 hover:text-green-300 underline">PR created ↗</a>}
+          {mergedToMain && <span className="text-green-400">Merged to main ✓</span>}
         </div>
       </header>
 
@@ -356,18 +361,18 @@ export default function Session() {
         {/* Main area */}
         <div className="flex flex-col flex-1 min-w-0">
           {/* Tabs */}
-          <div className="flex gap-1 px-4 pt-3 pb-0 border-b border-zinc-900 shrink-0">
+          <div className="flex gap-1 px-4 pt-2 md:pt-3 pb-0 border-b border-zinc-900 shrink-0">
             <button
               onClick={() => setTab('chat')}
-              className={`flex items-center gap-1.5 text-xs px-3 py-2 rounded-t-lg transition-colors ${tab === 'chat' ? 'text-zinc-100 border-b-2 border-zinc-400' : 'text-zinc-500 hover:text-zinc-300'}`}
+              className={`flex items-center justify-center gap-1.5 text-xs md:text-sm px-4 py-2.5 md:px-3 md:py-2 rounded-t-lg transition-colors min-h-[40px] min-w-[80px] ${tab === 'chat' ? 'text-zinc-100 border-b-2 border-zinc-400' : 'text-zinc-500 hover:text-zinc-300'}`}
             >
-              <MessageSquare size={12} /> Chat
+              <MessageSquare size={14} /> <span className="hidden sm:inline">Chat</span>
             </button>
             <button
               onClick={() => setTab('terminal')}
-              className={`flex items-center gap-1.5 text-xs px-3 py-2 rounded-t-lg transition-colors ${tab === 'terminal' ? 'text-zinc-100 border-b-2 border-zinc-400' : 'text-zinc-500 hover:text-zinc-300'}`}
+              className={`flex items-center justify-center gap-1.5 text-xs md:text-sm px-4 py-2.5 md:px-3 md:py-2 rounded-t-lg transition-colors min-h-[40px] min-w-[80px] ${tab === 'terminal' ? 'text-zinc-100 border-b-2 border-zinc-400' : 'text-zinc-500 hover:text-zinc-300'}`}
             >
-              <TerminalSquare size={12} /> Terminal
+              <TerminalSquare size={14} /> <span className="hidden sm:inline">Terminal</span>
             </button>
           </div>
 
