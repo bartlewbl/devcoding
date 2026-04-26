@@ -41,6 +41,67 @@ function stripStrikethrough(s: string): string {
   return s.replace(STRIKE_CHARS, '');
 }
 
+// \u2500\u2500 Cell-level styled extractor \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+// xterm's translateToString throws away SGR attributes. To restore some markdown
+// structure we walk cells ourselves and wrap consecutive bold runs in `**\u2026**`
+// and underlined runs in `__\u2026__`. Italic isn't used by either kimi or claude so
+// we ignore it. Strikethrough overlay glyphs are dropped via stripStrikethrough.
+//
+// Caveats:
+// - We only emit a marker when crossing a style boundary, so streamed content
+//   produces clean markup like "Some **bold** text" rather than "**S****o**\u2026".
+// - The cell `getChars()` includes the literal char for combining marks; we
+//   keep them so CJK / emoji aren't split.
+function readStyledLine(line: import('@xterm/headless').IBufferLine): string {
+  const w = line.length;
+  let out = '';
+  let bold = false;
+  let underline = false;
+  let cell: import('@xterm/headless').IBufferCell | undefined;
+  for (let x = 0; x < w; x++) {
+    cell = line.getCell(x, cell);
+    if (!cell) continue;
+    if (cell.getWidth() === 0) continue; // continuation cell of wide char
+    const chars = cell.getChars() || ' ';
+    const isBold = !!cell.isBold();
+    const isUnder = !!cell.isUnderline();
+
+    if (isBold !== bold) {
+      out += '**';
+      bold = isBold;
+    }
+    if (isUnder !== underline) {
+      out += '__';
+      underline = isUnder;
+    }
+    out += chars;
+  }
+  if (underline) out += '__';
+  if (bold) out += '**';
+  // Collapse trailing whitespace runs that sit inside style markers \u2014 they
+  // would otherwise show up as empty bold/underline (`** **`) at line end.
+  return out.replace(/(\*\*|__)\s+(\*\*|__)$/g, '$1$2').trimEnd();
+}
+
+// Determine if a styled line is "all bold" (heading-like). Cheap to compute
+// alongside the styled string but we recompute here from cells to avoid
+// regex-fighting with markdown markers in the styled string.
+function lineIsAllBold(line: import('@xterm/headless').IBufferLine): boolean {
+  const w = line.length;
+  let saw = false;
+  let cell: import('@xterm/headless').IBufferCell | undefined;
+  for (let x = 0; x < w; x++) {
+    cell = line.getCell(x, cell);
+    if (!cell) continue;
+    if (cell.getWidth() === 0) continue;
+    const chars = cell.getChars();
+    if (!chars || chars === ' ') continue;
+    saw = true;
+    if (!cell.isBold()) return false;
+  }
+  return saw;
+}
+
 // ── Provider-specific configs ─────────────────────────────────────────────────
 interface ProviderConfig {
   toolPrefixes: string[];
@@ -276,6 +337,35 @@ function toolName(t: string, config?: ProviderConfig): string {
 
 const SUMMARY_RE = /^(Read|Listed|Searched|Ran|Wrote|Created|Edited|Fetched)\s+\d+/i;
 function isToolSummary(t: string) { return SUMMARY_RE.test(t); }
+
+// Convert a single styled terminal line into a markdown-friendly line so
+// react-markdown can render headings, lists, etc. The input has already been
+// run through readStyledLine (so bold/underline are wrapped in **/__).
+//
+// Transformations, in order:
+//   1. Whole-line bold + reasonably short  → "## " prefixed heading.
+//      Strip the surrounding ** so it renders as a heading instead of bold
+//      paragraph; markdown headings are already visually emphasized in the
+//      chat's prose theme.
+//   2. Leading "•" / "◦" / "▪" + whitespace → "- " (markdown unordered list).
+//   3. Leading "N." numeric prefix is left alone — already valid markdown.
+//   4. Indented (≥2 spaces) bullet/number → preserve indentation as a nested
+//      list item.
+function toMarkdownLine(line: string, allBold: boolean): string {
+  let s = line;
+
+  // 2/4: list bullets, possibly indented.
+  s = s.replace(/^(\s*)[•◦▪]\s+/u, (_m, indent: string) => `${indent}- `);
+
+  // 1: heading (skip if the line is itself a list item — bold list rows are
+  // common in TODO lists and shouldn't collapse into headings).
+  if (allBold && !/^\s*[-\d]/.test(s) && s.length <= 80) {
+    const stripped = s.replace(/\*\*/g, '').trim();
+    if (stripped) return `## ${stripped}`;
+  }
+
+  return s;
+}
 
 // ── Content formatting ────────────────────────────────────────────────────────
 function formatContent(lines: string[], config: ProviderConfig): string {
@@ -529,31 +619,27 @@ export class OutputParser {
     // as two separate chat messages just because the terminal hit its column
     // limit. The logical line keeps the START row's index as its key so its
     // streamId remains stable across extracts even if more wrap-rows appear.
-    type LogicalLine = { idx: number; lastIdx: number; text: string };
+    type LogicalLine = { idx: number; lastIdx: number; text: string; allBold: boolean };
     const logical: LogicalLine[] = [];
     for (let i = start; i < end; i++) {
       const line = buf.getLine(i);
       if (!line) continue;
-      const raw = line.translateToString(true).trimEnd();
+      const raw = readStyledLine(line);
       const wrapsPrev = (line as { isWrapped?: boolean }).isWrapped === true;
       const last = logical[logical.length - 1];
       if (wrapsPrev && last && last.lastIdx === i - 1) {
-        // Terminal wraps long lines mid-word with no separator — concatenate
-        // without an inserted space so "Dashboard" + "and" reassembles as
-        // "Dashboardand" rather than "Dashboard and"... wait, actually xterm
-        // keeps the original characters intact across the wrap boundary. If
-        // the model wrote "Dashboard and" and that wrapped between the 'd'
-        // and the space, row N ends with "...Dashboard" and row N+1 begins
-        // with " and...". Either way, plain concatenation reproduces the
-        // original text verbatim.
+        // xterm wraps long lines onto consecutive rows; concatenate verbatim.
         last.text += raw;
         last.lastIdx = i;
+        // A wrapped continuation can't change "all-bold" — once any row in
+        // the run isn't all-bold the heading semantics are lost.
+        if (last.allBold && !lineIsAllBold(line)) last.allBold = false;
         continue;
       }
-      logical.push({ idx: i, lastIdx: i, text: raw });
+      logical.push({ idx: i, lastIdx: i, text: raw, allBold: lineIsAllBold(line) });
     }
 
-    for (const { idx: i, text: rawLine } of logical) {
+    for (const { idx: i, text: rawLine, allBold } of logical) {
       const clean = stripStrikethrough(rawLine).trim();
       if (!clean) continue;
 
@@ -582,12 +668,14 @@ export class OutputParser {
 
         if (this.isToolCall(t) || isToolSummary(t)) {
           kind = 'tool-call';
-          content = t;
+          // Tool-call card doesn't render markdown bold; strip the markers
+          // we emitted from the styled extractor.
+          content = t.replace(/\*\*/g, '').replace(/__/g, '');
           extractedToolName = toolName(t, config);
           this.lastToolName = extractedToolName;
         } else {
           kind = 'ai-text';
-          content = t;
+          content = toMarkdownLine(clean, allBold);
         }
       }
 

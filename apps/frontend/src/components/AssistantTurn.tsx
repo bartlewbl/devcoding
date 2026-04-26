@@ -367,9 +367,34 @@ export default function AssistantTurn({ messages, model }: Props) {
     }
   };
 
+  // Decide how to glue two consecutive ai-text lines together. Markdown treats
+  // a blank line as a paragraph break, so unconditionally using "\n\n" makes
+  // every terminal line its own paragraph and breaks lists / numbered items.
+  // Heuristic: if either side is a list item, table row, heading, or code
+  // fence, single newline joins them into one block. Otherwise, paragraph.
+  const isStructural = (s: string): boolean => {
+    const t = s.trimStart();
+    return (
+      /^[-*+]\s/.test(t) ||         // unordered list
+      /^\d+\.\s/.test(t) ||         // ordered list
+      /^>\s?/.test(t) ||            // blockquote
+      /^#{1,6}\s/.test(t) ||        // heading
+      /^\|/.test(t) ||              // table row
+      /^```/.test(t)                // fence
+    );
+  };
+  const joinAiText = (existing: string, incoming: string): string => {
+    if (!existing) return incoming;
+    const lastLine = existing.slice(existing.lastIndexOf('\n') + 1);
+    if (isStructural(lastLine) || isStructural(incoming)) {
+      return existing + '\n' + incoming;
+    }
+    return existing + '\n\n' + incoming;
+  };
+
   for (const msg of messages) {
     if (msg.type === 'ai-text') {
-      textBuf += (textBuf ? '\n\n' : '') + msg.content;
+      textBuf = joinAiText(textBuf, msg.content);
     } else if (msg.type === 'tool-call') {
       flushText();
       elements.push({ type: 'tool', msg, results: [] });
