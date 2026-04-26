@@ -1,4 +1,4 @@
-# Deploy AI Code Studio on Hetzner
+# Deploy bartlew code on Hetzner
 
 ## What you get
 
@@ -128,7 +128,7 @@ Go to [github.com/settings/developers](https://github.com/settings/developers) â
 
 | Field | Value |
 |---|---|
-| Application name | `AI Code Studio` |
+| Application name | `bartlew code` |
 | Homepage URL | Your frontend URL |
 | Authorization callback URL | `https://api.yourdomain.com/api/github/callback` |
 

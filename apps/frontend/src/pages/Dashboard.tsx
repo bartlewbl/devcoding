@@ -55,7 +55,7 @@ export default function Dashboard() {
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
       {/* Header */}
       <header className="border-b border-zinc-900 px-6 py-4 flex items-center justify-between">
-        <h1 className="text-lg font-semibold">AI Code Studio</h1>
+        <h1 className="text-lg font-semibold">bartlew code</h1>
         <div className="flex items-center gap-3">
           {!githubConnected && (
             <button

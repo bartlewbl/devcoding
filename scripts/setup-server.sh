@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "=== AI Code Studio — Hetzner Server Setup ==="
+echo "=== bartlew code — Hetzner Server Setup ==="
 
 # ------------------------------------------------------------------
 # 1. System update
