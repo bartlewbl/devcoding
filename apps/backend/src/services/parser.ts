@@ -59,7 +59,6 @@ const PROVIDER_CONFIGS: Record<CLIProvider, ProviderConfig> = {
       /Contemplating/i,
       /esc\s*to\s*interrupt/i,
       /Update available/i,
-      /brew upgrade/i,
       /^[─━═\-─]{5,}$/,
       /^\(base\).*[@%]/,
       /^[▐▌▛▜▝▞▟▘▙▚]/u,

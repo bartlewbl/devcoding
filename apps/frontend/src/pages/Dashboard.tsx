@@ -54,21 +54,21 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
       {/* Header */}
-      <header className="border-b border-zinc-900 px-6 py-4 flex items-center justify-between">
+      <header className="border-b border-zinc-900 px-4 py-3 md:px-6 md:py-4 flex items-center justify-between gap-3 flex-wrap">
         <h1 className="text-lg font-semibold">AI Code Studio</h1>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 md:gap-3">
           {!githubConnected && (
             <button
               onClick={connectGitHub}
               className="flex items-center gap-2 text-sm bg-zinc-800 hover:bg-zinc-700 rounded-lg px-3 py-2 transition-colors"
             >
               <Github size={15} />
-              Connect GitHub
+              <span className="hidden sm:inline">Connect GitHub</span>
             </button>
           )}
           {githubConnected && (
             <span className="flex items-center gap-1.5 text-xs text-green-500">
-              <Github size={13} /> GitHub connected
+              <Github size={13} /> <span className="hidden sm:inline">GitHub connected</span>
             </span>
           )}
           <button
@@ -91,7 +91,7 @@ export default function Dashboard() {
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-6 py-8">
+      <main className="max-w-5xl mx-auto px-4 py-6 md:px-6 md:py-8">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-sm text-zinc-400">Sessions</h2>
           <button

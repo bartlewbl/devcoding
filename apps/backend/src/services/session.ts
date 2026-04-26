@@ -164,16 +164,10 @@ export function spawnCLI(
   // Kimi uses default_model from ~/.kimi/config.toml — passing --model breaks OAuth login
 
   // Spawn the user's login shell so it sources nvm/homebrew/etc.
-  // Then upgrade the CLI and launch it — the shell's PATH will have everything.
   const shell = process.env.SHELL || '/bin/bash';
   const cmdLine = args.length ? `${cmdName} ${args.join(' ')}` : cmdName;
-  const brewUpgrade =
-    session.model === 'claude' ? 'brew upgrade claude-code' :
-    session.model === 'kimi' ? 'uv tool upgrade kimi-cli' :
-    'npm install -g @openai/codex';
-  const fullCmd = `${brewUpgrade}; ${cmdLine}`;
 
-  console.log(`[PTY] spawning shell ${shell} → will run: ${fullCmd} in ${session.worktreePath}`);
+  console.log(`[PTY] spawning shell ${shell} → will run: ${cmdLine} in ${session.worktreePath}`);
 
   const proc = ptyLib.spawn(shell, ['-l', '-i'], {
     name: 'xterm-256color',
@@ -196,8 +190,8 @@ export function spawnCLI(
   );
   session.parser = parser;
 
-  // Give the shell ~800ms to source its profile, then upgrade + launch the CLI
-  setTimeout(() => proc.write(fullCmd + '\r'), 800);
+  // Give the shell ~800ms to source its profile, then launch the CLI
+  setTimeout(() => proc.write(cmdLine + '\r'), 800);
 
   proc.onData((data: string) => {
     // Keep a rolling buffer for terminal replay on reconnect

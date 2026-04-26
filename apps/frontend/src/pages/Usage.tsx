@@ -235,8 +235,8 @@ export default function Usage() {
             No usage data yet — usage will appear as AI sessions run
           </div>
         ) : (
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-            <table className="w-full text-left text-sm">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden overflow-x-auto">
+            <table className="w-full text-left text-sm min-w-[640px]">
               <thead className="bg-zinc-800/50 text-zinc-400">
                 <tr>
                   <th className="px-4 py-3 font-medium">Time</th>

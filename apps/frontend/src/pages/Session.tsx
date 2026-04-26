@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { GitBranch, Upload, Square, ArrowLeft, TerminalSquare, MessageSquare, Zap, Clock, CheckCircle, XCircle, ChevronDown, GitPullRequest, GitMerge } from 'lucide-react';
+import { GitBranch, Upload, Square, ArrowLeft, TerminalSquare, MessageSquare, Zap, Clock, CheckCircle, XCircle, ChevronDown, GitPullRequest, GitMerge, Menu, FileCode } from 'lucide-react';
 import { useSocket } from '../hooks/useSocket';
 import Terminal from '../components/Terminal';
 import ChatPanel from '../components/ChatPanel';
@@ -38,6 +38,8 @@ export default function Session() {
   const [showMenu, setShowMenu] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
+  const [showMobileLeft, setShowMobileLeft] = useState(false);
+  const [showMobileRight, setShowMobileRight] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -126,6 +128,7 @@ export default function Session() {
 
   const onFileSelect = (file: string) => {
     setSelectedFile(file);
+    setShowMobileRight(false);
     if (socket && sessionId) {
       socket.emit('diff:request', { sessionId, file });
     }
@@ -174,20 +177,31 @@ export default function Session() {
         </div>
       )}
       {/* Header */}
-      <header className="border-b border-zinc-900 px-4 py-3 flex items-center gap-3 shrink-0">
-        <Link to="/dashboard" className="text-zinc-500 hover:text-zinc-300 transition-colors">
+      <header className="border-b border-zinc-900 px-3 py-2 md:px-4 md:py-3 flex items-center gap-2 md:gap-3 shrink-0 flex-wrap">
+        <Link to="/dashboard" className="text-zinc-500 hover:text-zinc-300 transition-colors shrink-0">
           <ArrowLeft size={16} />
         </Link>
-        <GitBranch size={14} className="text-zinc-500" />
-        <span className="font-mono text-sm text-zinc-300">{session.branch}</span>
-        <span className="text-zinc-700 text-xs">·</span>
-        <span className="text-xs text-zinc-500">{session.repoFullName}</span>
-        <span className="text-xs text-zinc-700 capitalize ml-1">{session.model}</span>
+
+        {/* Mobile sidebar toggles */}
+        <button
+          onClick={() => setShowMobileLeft(!showMobileLeft)}
+          className="md:hidden flex items-center gap-1 text-xs bg-zinc-800 hover:bg-zinc-700 rounded-lg px-2 py-1.5 transition-colors shrink-0"
+          title="Sessions"
+        >
+          <Menu size={14} />
+          <span className="text-zinc-400">Sessions</span>
+        </button>
+
+        <GitBranch size={14} className="text-zinc-500 hidden sm:block shrink-0" />
+        <span className="font-mono text-sm text-zinc-300 truncate max-w-[120px] sm:max-w-none">{session.branch}</span>
+        <span className="text-zinc-700 text-xs hidden md:inline">·</span>
+        <span className="text-xs text-zinc-500 hidden md:inline">{session.repoFullName}</span>
+        <span className="text-xs text-zinc-700 capitalize hidden lg:inline ml-1">{session.model}</span>
         {session.modelName && (
-          <span className="text-xs text-zinc-600 ml-1">({session.modelName})</span>
+          <span className="text-xs text-zinc-600 hidden lg:inline ml-1">({session.modelName})</span>
         )}
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-2 flex-wrap">
           {pushUrl && <a href={pushUrl} target="_blank" rel="noreferrer" className="text-xs text-green-400 hover:text-green-300 underline">Branch pushed ↗</a>}
           {prUrl && <a href={prUrl} target="_blank" rel="noreferrer" className="text-xs text-green-400 hover:text-green-300 underline">PR created ↗</a>}
           {mergedToMain && <span className="text-xs text-green-400">Merged to main ✓</span>}
@@ -196,10 +210,12 @@ export default function Session() {
             <button
               onClick={() => setShowMenu(!showMenu)}
               disabled={actionInProgress !== null || session.status === 'creating'}
-              className="flex items-center gap-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 rounded-lg px-3 py-1.5 transition-colors disabled:opacity-40"
+              className="flex items-center gap-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 rounded-lg px-3 py-1.5 transition-colors disabled:opacity-40 shrink-0"
             >
               <Upload size={12} />
-              {actionInProgress === 'push' ? 'Pushing…' : actionInProgress === 'pr' ? 'Creating PR…' : actionInProgress === 'merge' ? 'Merging…' : 'Git Actions'}
+              <span className="hidden sm:inline">
+                {actionInProgress === 'push' ? 'Pushing…' : actionInProgress === 'pr' ? 'Creating PR…' : actionInProgress === 'merge' ? 'Merging…' : 'Git Actions'}
+              </span>
               <ChevronDown size={12} />
             </button>
 
@@ -229,17 +245,49 @@ export default function Session() {
 
           <button
             onClick={endSession}
-            className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-red-400 transition-colors px-2 py-1.5"
+            className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-red-400 transition-colors px-2 py-1.5 shrink-0"
           >
-            <Square size={12} /> End
+            <Square size={12} /> <span className="hidden sm:inline">End</span>
+          </button>
+
+          {/* Mobile files toggle */}
+          <button
+            onClick={() => setShowMobileRight(!showMobileRight)}
+            className="md:hidden flex items-center gap-1 text-xs bg-zinc-800 hover:bg-zinc-700 rounded-lg px-2 py-1.5 transition-colors shrink-0"
+            title="Files"
+          >
+            <FileCode size={14} />
+            <span className="text-zinc-400">Files</span>
           </button>
         </div>
       </header>
 
       {/* Body */}
-      <div className="flex flex-1 min-h-0">
+      <div className="flex flex-1 min-h-0 relative">
+        {/* Mobile left backdrop */}
+        {showMobileLeft && (
+          <div
+            className="fixed inset-0 bg-black/50 z-40 md:hidden"
+            onClick={() => setShowMobileLeft(false)}
+          />
+        )}
+
+        {/* Mobile right backdrop */}
+        {showMobileRight && (
+          <div
+            className="fixed inset-0 bg-black/50 z-40 md:hidden"
+            onClick={() => setShowMobileRight(false)}
+          />
+        )}
+
         {/* Left sidebar: sessions */}
-        <div className="w-64 border-r border-zinc-900 flex flex-col shrink-0 bg-zinc-950">
+        <div
+          className={`w-64 border-r border-zinc-900 flex flex-col shrink-0 bg-zinc-950 z-50
+            fixed md:relative inset-y-0 left-0 transform transition-transform duration-200 ease-out
+            ${showMobileLeft ? 'translate-x-0' : '-translate-x-full'}
+            md:translate-x-0
+          `}
+        >
           <div className="px-4 py-3 border-b border-zinc-900 flex items-center justify-between">
             <span className="text-xs text-zinc-500 uppercase tracking-wider">Sessions</span>
             <button
@@ -274,7 +322,10 @@ export default function Session() {
                             return (
                               <button
                                 key={s.id}
-                                onClick={() => navigate(`/session/${s.id}`)}
+                                onClick={() => {
+                                  navigate(`/session/${s.id}`);
+                                  setShowMobileLeft(false);
+                                }}
                                 className={`w-full text-left rounded-lg px-3 py-2 transition-colors ${
                                   isActive
                                     ? 'bg-zinc-800 border border-zinc-700'
@@ -332,9 +383,21 @@ export default function Session() {
         </div>
 
         {/* Right sidebar: files + diff */}
-        <div className="w-72 border-l border-zinc-900 flex flex-col shrink-0">
-          <div className="px-4 py-3 border-b border-zinc-900">
+        <div
+          className={`w-72 border-l border-zinc-900 flex flex-col shrink-0 bg-zinc-950 z-50
+            fixed md:relative inset-y-0 right-0 transform transition-transform duration-200 ease-out
+            ${showMobileRight ? 'translate-x-0' : 'translate-x-full'}
+            md:translate-x-0
+          `}
+        >
+          <div className="px-4 py-3 border-b border-zinc-900 flex items-center justify-between md:justify-start">
             <span className="text-xs text-zinc-500 uppercase tracking-wider">Changed Files</span>
+            <button
+              onClick={() => setShowMobileRight(false)}
+              className="md:hidden text-zinc-500 hover:text-zinc-300 transition-colors"
+            >
+              ✕
+            </button>
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto py-2">
             <FileTree files={files} selected={selectedFile} onSelect={onFileSelect} />
@@ -344,13 +407,13 @@ export default function Session() {
 
       {/* Code diff modal */}
       {selectedFile && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setSelectedFile(null)}>
-          <div className="bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl flex flex-col max-w-4xl w-11/12 h-5/6 max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
-              <span className="font-mono text-sm text-zinc-100">{selectedFile}</span>
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setSelectedFile(null)}>
+          <div className="bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl flex flex-col w-full max-w-4xl h-[85vh] md:h-5/6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-3 md:px-6 md:py-4 border-b border-zinc-800 gap-3">
+              <span className="font-mono text-sm text-zinc-100 truncate">{selectedFile}</span>
               <button
                 onClick={() => setSelectedFile(null)}
-                className="text-zinc-500 hover:text-zinc-300 transition-colors"
+                className="text-zinc-500 hover:text-zinc-300 transition-colors shrink-0"
               >
                 ✕
               </button>

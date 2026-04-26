@@ -15,6 +15,7 @@ import { authMiddleware } from './middleware/auth';
 import { setupWebSocketHandler } from './ws/handler';
 import { reconcileWorktreesOnStartup } from './services/worktree-manager';
 import { getActiveSessionIds, initSessions } from './services/session';
+import { startBackgroundUpdater } from './services/updater';
 
 const app = express();
 const httpServer = createServer(app);
@@ -38,6 +39,7 @@ app.use('/api/usage', authMiddleware, usageRoutes);
 setupWebSocketHandler(io);
 
 initSessions();
+startBackgroundUpdater();
 
 const PORT = process.env.PORT || 3001;
 httpServer.listen(PORT, () => {

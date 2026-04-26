@@ -65,7 +65,7 @@ export default function NewSessionModal({ socket, onClose, onCreated }: Props) {
 
           <div>
             <label className="block text-xs text-zinc-400 mb-2">Provider</label>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               {(['claude', 'kimi', 'codex'] as const).map((m) => (
                 <button
                   key={m}
@@ -77,7 +77,7 @@ export default function NewSessionModal({ socket, onClose, onCreated }: Props) {
                       'gpt-5.4'
                     );
                   }}
-                  className={`flex-1 py-2 rounded-lg text-sm capitalize transition-colors ${model === m ? 'bg-zinc-700 text-zinc-100' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-750'}`}
+                  className={`flex-1 min-w-[80px] py-2 rounded-lg text-sm capitalize transition-colors ${model === m ? 'bg-zinc-700 text-zinc-100' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-750'}`}
                 >
                   {m}
                 </button>
@@ -116,12 +116,12 @@ export default function NewSessionModal({ socket, onClose, onCreated }: Props) {
               <label className="block text-xs text-zinc-400 mb-2">
                 Reasoning Effort
               </label>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 {(['low', 'medium', 'high'] as const).map((e) => (
                   <button
                     key={e}
                     onClick={() => setEffort(e)}
-                    className={`flex-1 py-2 rounded-lg text-sm capitalize transition-colors ${effort === e ? 'bg-zinc-700 text-zinc-100' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-750'}`}
+                    className={`flex-1 min-w-[80px] py-2 rounded-lg text-sm capitalize transition-colors ${effort === e ? 'bg-zinc-700 text-zinc-100' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-750'}`}
                   >
                     {e}
                   </button>

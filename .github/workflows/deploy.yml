@@ -5,11 +5,20 @@ on:
     branches: [main]
     paths:
       - 'apps/backend/**'
-      - 'package*.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'scripts/deploy.sh'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-hetzner
+  cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
@@ -17,10 +26,9 @@ jobs:
           host: ${{ secrets.HETZNER_HOST }}
           username: ${{ secrets.HETZNER_USER }}
           key: ${{ secrets.HETZNER_SSH_KEY }}
+          port: ${{ secrets.HETZNER_PORT || 22 }}
+          script_stop: true
           script: |
+            set -euo pipefail
             cd /var/www/ai-code-studio
-            git pull origin main
-            cd apps/backend
-            npm install
-            npm run build
-            pm2 reload ecosystem.config.js --env production
+            bash scripts/deploy.sh
