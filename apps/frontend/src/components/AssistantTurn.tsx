@@ -62,7 +62,8 @@ const toolMeta = (name: string) => {
   if (n.includes('read') || n.includes('view') || n.includes('list')) {
     return { icon: FileText, color: 'border-l-sky-500 text-sky-400 bg-sky-950/40' };
   }
-  if (n.includes('edit') || n.includes('modify') || n.includes('update')) {
+  // Match before generic "edit": kimi uses "StrReplaceFile" / "Replace".
+  if (n.includes('edit') || n.includes('modify') || n.includes('update') || n.includes('replace')) {
     return { icon: FileEdit, color: 'border-l-amber-500 text-amber-400 bg-amber-950/40' };
   }
   if (n.includes('write') || n.includes('create')) {
@@ -71,13 +72,14 @@ const toolMeta = (name: string) => {
   if (n.includes('delete')) {
     return { icon: FileMinus, color: 'border-l-red-500 text-red-400 bg-red-950/40' };
   }
-  if (n.includes('bash') || n.includes('run') || n.includes('exec')) {
+  // Kimi's "Shell" tool maps to a terminal command alongside bash/run/exec.
+  if (n.includes('bash') || n.includes('run') || n.includes('exec') || n === 'shell') {
     return { icon: Terminal, color: 'border-l-lime-500 text-lime-400 bg-lime-950/40' };
   }
   if (n.includes('search') || n.includes('grep') || n.includes('glob')) {
     return { icon: Search, color: 'border-l-violet-500 text-violet-400 bg-violet-950/40' };
   }
-  if (n.includes('fetch') || n.includes('web')) {
+  if (n.includes('fetch') || n.includes('web') || n.includes('url')) {
     return { icon: Globe, color: 'border-l-cyan-500 text-cyan-400 bg-cyan-950/40' };
   }
   if (n.includes('todo')) {

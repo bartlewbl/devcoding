@@ -22,10 +22,14 @@ import { getDiff } from '../services/git';
 import { githubTokens } from '../routes/github';
 import { JwtPayload } from '../middleware/auth';
 import { ChatMessage } from '../types';
+import { detectAuthPrompt } from '../services/auth-detector';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
 const IDLE_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;   // 5 minutes
+
+// Track auth URLs already emitted per session to avoid spam
+const emittedAuthUrls = new Map<string, Set<string>>();
 
 export function setupWebSocketHandler(io: Server): void {
   io.use((socket, next) => {
@@ -68,7 +72,18 @@ export function setupWebSocketHandler(io: Server): void {
         // Spawn CLI — emit to the session room so any viewer gets updates
         spawnCLI(
           session,
-          (raw) => io.to(session.id).emit('terminal:data', { sessionId: session.id, data: raw }),
+          (raw) => {
+            io.to(session.id).emit('terminal:data', { sessionId: session.id, data: raw });
+            const auth = detectAuthPrompt(session.model, raw);
+            if (auth) {
+              const seen = emittedAuthUrls.get(session.id) || new Set();
+              if (!seen.has(auth.url)) {
+                seen.add(auth.url);
+                emittedAuthUrls.set(session.id, seen);
+                io.to(session.id).emit('session:auth-required', { sessionId: session.id, ...auth });
+              }
+            }
+          },
           (chunk) => {
             const message: ChatMessage = { id: uuidv4(), ...chunk, timestamp: Date.now() };
             addMessage(session.id, message);
@@ -109,12 +124,20 @@ export function setupWebSocketHandler(io: Server): void {
     });
 
     // ── Chat input → PTY ─────────────────────────────────────
-    socket.on('session:chat', ({ sessionId, message }: { sessionId: string; message: string }) => {
+    socket.on('session:chat', ({ sessionId, message, streamId }: { sessionId: string; message: string; streamId?: string }) => {
       const s = getSession(sessionId);
       if (!s || s.userId !== userId) return;
       touchSession(sessionId);
-      // Persist user message so other tabs / late joiners see it
-      const msg: ChatMessage = { id: uuidv4(), type: 'user' as const, content: message, timestamp: Date.now() };
+      // Persist user message so other tabs / late joiners see it. The client
+      // passes its optimistic streamId so the broadcast replaces the local
+      // bubble in place instead of appending a duplicate.
+      const msg: ChatMessage = {
+        id: uuidv4(),
+        type: 'user' as const,
+        content: message,
+        timestamp: Date.now(),
+        streamId,
+      };
       addMessage(sessionId, msg);
       io.to(sessionId).emit('chat:message', { sessionId, message: msg });
       s.pty?.write(message + '\r');
@@ -156,7 +179,18 @@ export function setupWebSocketHandler(io: Server): void {
       if (s.status === 'stopped') {
         const restarted = restartSession(
           sessionId,
-          (raw) => io.to(sessionId).emit('terminal:data', { sessionId, data: raw }),
+          (raw) => {
+            io.to(sessionId).emit('terminal:data', { sessionId, data: raw });
+            const auth = detectAuthPrompt(s.model, raw);
+            if (auth) {
+              const seen = emittedAuthUrls.get(sessionId) || new Set();
+              if (!seen.has(auth.url)) {
+                seen.add(auth.url);
+                emittedAuthUrls.set(sessionId, seen);
+                io.to(sessionId).emit('session:auth-required', { sessionId, ...auth });
+              }
+            }
+          },
           (chunk) => {
             const message: ChatMessage = { id: uuidv4(), ...chunk, timestamp: Date.now() };
             addMessage(sessionId, message);

@@ -37,7 +37,20 @@ export default function ChatPanel({ sessionId, socket, model }: Props) {
   useEffect(() => {
     const onMessage = ({ sessionId: sid, message }: { sessionId: string; message: Msg }) => {
       if (sid !== sessionId) return;
-      setMessages((prev) => [...prev, message]);
+      setMessages((prev) => {
+        // Streaming updates: a chunk with a streamId that matches an existing
+        // message replaces it in place (in-order), so the chat reflects the
+        // partial line as it grows in the terminal.
+        if (message.streamId) {
+          const idx = prev.findIndex((m) => m.streamId === message.streamId);
+          if (idx >= 0) {
+            const next = prev.slice();
+            next[idx] = { ...prev[idx], ...message };
+            return next;
+          }
+        }
+        return [...prev, message];
+      });
     };
     const onHistory = ({ sessionId: sid, messages: hist }: { sessionId: string; messages: Msg[] }) => {
       if (sid !== sessionId) return;
@@ -58,13 +71,18 @@ export default function ChatPanel({ sessionId, socket, model }: Props) {
   const send = () => {
     const text = input.trim();
     if (!text) return;
+    // Shared streamId for optimistic local insert and the server's broadcast,
+    // so the upsert in onMessage replaces this bubble in place rather than
+    // appending the server-issued copy alongside it.
+    const streamId = `u-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     setMessages((prev) => [...prev, {
-      id: Date.now().toString(),
+      id: streamId,
       type: 'user',
       content: text,
       timestamp: Date.now(),
+      streamId,
     }]);
-    socket.emit('session:chat', { sessionId, message: text });
+    socket.emit('session:chat', { sessionId, message: text, streamId });
     setInput('');
   };
 

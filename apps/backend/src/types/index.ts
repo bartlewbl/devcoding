@@ -46,6 +46,10 @@ export interface ChatMessage {
   content: string;
   toolName?: string;
   timestamp: number;
+  // Stable identifier for streaming updates. When a chat:message arrives with
+  // a streamId matching an existing message, the frontend replaces it in place
+  // (used for text/tool-call lines that grow as the model emits them).
+  streamId?: string;
 }
 
 export interface GithubRepo {

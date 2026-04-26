@@ -92,8 +92,18 @@ export async function createSession(
 export function addMessage(id: string, message: ChatMessage): boolean {
   const s = sessions.get(id);
   if (!s) return false;
+
+  // Streaming updates: when a chunk re-emits with the same streamId, replace
+  // the prior message in place so chat:history replay matches the live UI.
+  if (message.streamId) {
+    const existingIdx = s.messages.findIndex((m) => m.streamId === message.streamId);
+    if (existingIdx >= 0) {
+      s.messages[existingIdx] = { ...s.messages[existingIdx], ...message };
+      return true;
+    }
+  }
+
   s.messages.push(message);
-  // Keep last 500 messages to avoid unbounded growth
   if (s.messages.length > 500) {
     s.messages = s.messages.slice(-500);
   }

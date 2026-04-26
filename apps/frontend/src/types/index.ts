@@ -18,6 +18,9 @@ export interface ChatMessage {
   content: string;
   toolName?: string;
   timestamp: number;
+  // Streaming updates: when a new message arrives with a streamId that already
+  // exists in state, the frontend replaces that message instead of appending.
+  streamId?: string;
 }
 
 export interface GithubRepo {

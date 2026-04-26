@@ -7,6 +7,7 @@ import ChatPanel from '../components/ChatPanel';
 import FileTree from '../components/FileTree';
 import DiffViewer from '../components/DiffViewer';
 import NewSessionModal from '../components/NewSessionModal';
+import AuthPromptModal from '../components/AuthPromptModal';
 import { SessionSummary } from '../types';
 import api from '../lib/api';
 
@@ -40,6 +41,7 @@ export default function Session() {
   const [showNew, setShowNew] = useState(false);
   const [showMobileLeft, setShowMobileLeft] = useState(false);
   const [showMobileRight, setShowMobileRight] = useState(false);
+  const [authPrompt, setAuthPrompt] = useState<{ provider: 'claude' | 'kimi' | 'codex'; url: string; code?: string } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -116,6 +118,10 @@ export default function Session() {
       if (!sid || sid === sessionId) setSessionError(error);
     });
 
+    socket.on('session:auth-required', ({ sessionId: sid, provider, url, code }: { sessionId: string; provider: 'claude' | 'kimi' | 'codex'; url: string; code?: string }) => {
+      if (sid === sessionId) setAuthPrompt({ provider, url, code });
+    });
+
     return () => {
       socket.off('files:update');
       socket.off('diff:update');
@@ -123,6 +129,7 @@ export default function Session() {
       socket.off('session:pr-created');
       socket.off('session:merged-to-main');
       socket.off('session:ended');
+      socket.off('session:auth-required');
     };
   }, [socket, sessionId, selectedFile]);
 
@@ -434,6 +441,15 @@ export default function Session() {
         <NewSessionModal
           socket={socket}
           onClose={() => setShowNew(false)}
+        />
+      )}
+
+      {authPrompt && (
+        <AuthPromptModal
+          provider={authPrompt.provider}
+          url={authPrompt.url}
+          code={authPrompt.code}
+          onClose={() => setAuthPrompt(null)}
         />
       )}
     </div>
