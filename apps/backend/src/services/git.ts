@@ -75,9 +75,54 @@ export async function removeWorktree(repoPath: string, worktreePath: string, ses
   }
 }
 
+export async function commitChanges(worktreePath: string, message: string): Promise<void> {
+  const git = simpleGit(worktreePath);
+  await git.add('.');
+  await git.commit(message).catch(() => null);
+}
+
 export async function pushBranch(worktreePath: string, branch: string): Promise<void> {
   const git = simpleGit(worktreePath);
+  await commitChanges(worktreePath, 'AI-generated changes');
   await git.push(['origin', branch, '--set-upstream']);
+}
+
+export async function mergeToMain(repoPath: string, worktreePath: string, branch: string): Promise<void> {
+  await pushBranch(worktreePath, branch);
+
+  const git = simpleGit(repoPath);
+  await git.fetch(['origin', 'main']);
+
+  // Stash any unexpected local changes so checkout doesn't fail
+  let stashed = false;
+  const preStatus = await git.status();
+  if (preStatus.modified.length || preStatus.created.length || preStatus.deleted.length) {
+    await git.stash(['-u']).catch(() => null);
+    stashed = true;
+  }
+
+  try {
+    await git.checkout('main');
+    await git.pull();
+    await git.merge([branch]);
+  } catch (err: any) {
+    const status = await git.status().catch(() => null);
+    if (status && status.conflicted.length > 0) {
+      await git.merge(['--abort']).catch(() => null);
+      throw new Error(`Merge conflicts in ${status.conflicted.join(', ')}. Please create a PR and resolve manually.`);
+    }
+    await git.merge(['--abort']).catch(() => null);
+    throw err;
+  } finally {
+    if (stashed) {
+      await git.stash(['pop']).catch(() => null);
+    }
+  }
+}
+
+export async function pushMain(repoPath: string): Promise<void> {
+  const git = simpleGit(repoPath);
+  await git.push(['origin', 'main']);
 }
 
 export async function getDiff(worktreePath: string, file?: string): Promise<string> {

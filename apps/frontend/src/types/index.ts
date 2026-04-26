@@ -14,7 +14,7 @@ export interface SessionSummary {
 
 export interface ChatMessage {
   id: string;
-  type: 'user' | 'tool-call' | 'ai-text' | 'system';
+  type: 'user' | 'tool-call' | 'tool-result' | 'ai-text' | 'system';
   content: string;
   toolName?: string;
   timestamp: number;

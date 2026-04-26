@@ -48,10 +48,10 @@ export function recordUsage(
 ): UsageRecord | undefined {
   load();
 
-  const parsed = parseUsageLine(provider, rawLine);
-  if (!parsed && !looksLikeUsage(rawLine, provider)) {
-    return undefined;
-  }
+  const parsed = parseUsageLine(rawLine);
+  // Only persist records that actually contain numeric usage data —
+  // otherwise lines that merely mention "cost" or "usage" create empty ghost records.
+  if (!parsed) return undefined;
 
   const record: UsageRecord = {
     id: uuidv4(),
@@ -181,7 +181,9 @@ export function clearAllUsage(): void {
   save();
 }
 
-// ── Provider-specific usage parsing ───────────────────────────────────────────
+// ── Usage parsing ─────────────────────────────────────────────────────────────
+// Providers print tokens in varying shapes; we parse the union so the same
+// logic works for Claude Code, Kimi, and Codex without per-provider branches.
 
 interface ParsedUsage {
   inputTokens?: number;
@@ -190,93 +192,71 @@ interface ParsedUsage {
   costUsd?: number;
 }
 
-function looksLikeUsage(line: string, provider: string): boolean {
-  const lower = line.toLowerCase();
+// Matches a numeric literal like "15", "1,234", "15.2", "15.2k", "1.5M".
+const NUM = String.raw`\d[\d,]*(?:\.\d+)?[kKmMbB]?`;
 
-  if (provider === 'claude') {
-    return (
-      /\$\d+\.\d+\s*(usd)?/i.test(line) ||
-      /\d[\d,]*\s*(tokens?|input|output)/i.test(line) ||
-      /^now usi/i.test(line) ||
-      /extra usage/i.test(line) ||
-      /anthropic\s*cost/i.test(line) ||
-      /claude-code\s*$/i.test(line)
-    );
+// Parse a numeric token string honoring comma separators and k/M/B suffixes.
+function parseTokenCount(raw: string): number | undefined {
+  const m = raw.trim().replace(/,/g, '').match(/^(\d+(?:\.\d+)?)\s*([kKmMbB]?)$/);
+  if (!m) return undefined;
+  const n = parseFloat(m[1]);
+  if (!isFinite(n)) return undefined;
+  switch (m[2].toLowerCase()) {
+    case 'k': return Math.round(n * 1_000);
+    case 'm': return Math.round(n * 1_000_000);
+    case 'b': return Math.round(n * 1_000_000_000);
+    default:  return Math.round(n);
   }
-
-  if (provider === 'kimi') {
-    return (
-      /\$\d+\.\d+/i.test(line) ||
-      /\d[\d,]*\s*(tokens?|input|output)/i.test(line) ||
-      /usage/i.test(lower) ||
-      /cost/i.test(lower)
-    );
-  }
-
-  if (provider === 'codex') {
-    return (
-      /\$\d+\.\d+/i.test(line) ||
-      /\d[\d,]*\s*(tokens?|input|output)/i.test(line) ||
-      /usage/i.test(lower) ||
-      /cost/i.test(lower)
-    );
-  }
-
-  return false;
 }
 
-function parseUsageLine(provider: string, line: string): ParsedUsage | undefined {
+// Extract a token count for a field given its synonyms. Tries both the
+// trailing form ("123k input") and the labeled form ("input: 123k").
+function extractTokenField(line: string, synonyms: string[]): number | undefined {
+  const group = synonyms.join('|');
+  const trailing = new RegExp(`(${NUM})\\s*(?:tokens?\\s+)?(?:${group})\\b`, 'i');
+  const labeled  = new RegExp(`\\b(?:${group})\\s*(?:tokens?)?\\s*[:=]\\s*(${NUM})`, 'i');
+  const m = line.match(trailing) || line.match(labeled);
+  return m ? parseTokenCount(m[1]) : undefined;
+}
+
+function parseUsageLine(line: string): ParsedUsage | undefined {
   const result: ParsedUsage = {};
   let hasValue = false;
 
-  if (provider === 'claude') {
-    // Cost: $0.0123 USD
-    const costMatch = line.match(/\$([\d,]+\.\d{2,})/);
-    if (costMatch) {
-      result.costUsd = parseFloat(costMatch[1].replace(/,/g, ''));
-      hasValue = true;
-    }
-
-    // Tokens: "1,234 tokens" or "1,234 input / 5,678 output"
-    const tokenInputOutput = line.match(/([\d,]+)\s*(?:input|in)\s*\W\s*([\d,]+)\s*(?:output|out)/i);
-    if (tokenInputOutput) {
-      result.inputTokens = parseInt(tokenInputOutput[1].replace(/,/g, ''), 10);
-      result.outputTokens = parseInt(tokenInputOutput[2].replace(/,/g, ''), 10);
-      result.totalTokens = (result.inputTokens || 0) + (result.outputTokens || 0);
-      hasValue = true;
-    } else {
-      const tokenMatch = line.match(/([\d,]+)\s*tokens?/i);
-      if (tokenMatch) {
-        result.totalTokens = parseInt(tokenMatch[1].replace(/,/g, ''), 10);
-        hasValue = true;
-      }
-    }
-  }
-
-  if (provider === 'kimi') {
-    const costMatch = line.match(/\$([\d,]+\.\d{2,})/);
-    if (costMatch) {
-      result.costUsd = parseFloat(costMatch[1].replace(/,/g, ''));
-      hasValue = true;
-    }
-
-    const tokenMatch = line.match(/([\d,]+)\s*tokens?/i);
-    if (tokenMatch) {
-      result.totalTokens = parseInt(tokenMatch[1].replace(/,/g, ''), 10);
+  // Cost: $0.12, $1,234.56, $0.1 USD
+  const costMatch = line.match(/\$\s*([\d,]+(?:\.\d+)?)\s*(?:USD)?/i);
+  if (costMatch) {
+    const cost = parseFloat(costMatch[1].replace(/,/g, ''));
+    if (isFinite(cost) && cost > 0) {
+      result.costUsd = cost;
       hasValue = true;
     }
   }
 
-  if (provider === 'codex') {
-    const costMatch = line.match(/\$([\d,]+\.\d{2,})/);
-    if (costMatch) {
-      result.costUsd = parseFloat(costMatch[1].replace(/,/g, ''));
-      hasValue = true;
-    }
+  const input = extractTokenField(line, ['input', 'prompt']);
+  if (input !== undefined) {
+    result.inputTokens = input;
+    hasValue = true;
+  }
 
-    const tokenMatch = line.match(/([\d,]+)\s*tokens?/i);
-    if (tokenMatch) {
-      result.totalTokens = parseInt(tokenMatch[1].replace(/,/g, ''), 10);
+  const output = extractTokenField(line, ['output', 'completion']);
+  if (output !== undefined) {
+    result.outputTokens = output;
+    hasValue = true;
+  }
+
+  if (result.inputTokens !== undefined || result.outputTokens !== undefined) {
+    result.totalTokens = (result.inputTokens || 0) + (result.outputTokens || 0);
+  } else {
+    // Fallback: "12,345 tokens" or "total tokens: 12.3k"
+    const total =
+      extractTokenField(line, ['total']) ??
+      (() => {
+        const m = line.match(new RegExp(`(${NUM})\\s*tokens?\\b`, 'i'));
+        return m ? parseTokenCount(m[1]) : undefined;
+      })();
+    if (total !== undefined) {
+      result.totalTokens = total;
       hasValue = true;
     }
   }

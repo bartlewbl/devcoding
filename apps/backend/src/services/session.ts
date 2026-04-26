@@ -2,7 +2,7 @@ import * as ptyLib from 'node-pty';
 import chokidar from 'chokidar';
 import { v4 as uuidv4 } from 'uuid';
 import os from 'os';
-import { cloneOrFetch, createWorktree, removeWorktree, pushBranch, getChangedFiles } from './git';
+import { cloneOrFetch, createWorktree, removeWorktree, pushBranch, getChangedFiles, mergeToMain as gitMergeToMain, pushMain } from './git';
 import { OutputParser, ParsedChunk } from './parser';
 import { Session, SessionSummary, ChatMessage } from '../types';
 import { recordUsage } from './usage';
@@ -269,4 +269,11 @@ export async function pushSession(id: string): Promise<void> {
   const s = sessions.get(id);
   if (!s?.worktreePath) throw new Error('Session not found');
   await pushBranch(s.worktreePath, s.branch);
+}
+
+export async function mergeToMainSession(id: string): Promise<void> {
+  const s = sessions.get(id);
+  if (!s?.repoPath || !s?.worktreePath) throw new Error('Session not found');
+  await gitMergeToMain(s.repoPath, s.worktreePath, s.branch);
+  await pushMain(s.repoPath);
 }

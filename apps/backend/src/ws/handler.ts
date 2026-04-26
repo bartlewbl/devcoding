@@ -1,6 +1,7 @@
 import { Server, Socket } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
+import { Octokit } from '@octokit/rest';
 import {
   createSession,
   getSession,
@@ -15,6 +16,7 @@ import {
   toSummary,
   stopSession,
   addMessage,
+  mergeToMainSession,
 } from '../services/session';
 import { getDiff } from '../services/git';
 import { githubTokens } from '../routes/github';
@@ -190,6 +192,55 @@ export function setupWebSocketHandler(io: Server): void {
           sessionId,
           branch: s.branch,
           url: `https://github.com/${s.repoFullName}/tree/${s.branch}`,
+        });
+      } catch (err: any) {
+        socket.emit('session:error', { sessionId, error: err.message });
+      }
+    });
+
+    // ── Create PR ────────────────────────────────────────────
+    socket.on('session:create-pr', async ({ sessionId }: { sessionId: string }) => {
+      const s = getSession(sessionId);
+      if (!s || s.userId !== userId) return;
+      touchSession(sessionId);
+      const token = githubTokens.get(userId);
+      if (!token) {
+        socket.emit('session:error', { sessionId, error: 'GitHub not connected' });
+        return;
+      }
+
+      try {
+        const octokit = new Octokit({ auth: token });
+        const [owner, repo] = s.repoFullName.split('/');
+        const { data } = await octokit.pulls.create({
+          owner,
+          repo,
+          title: `AI: ${s.branch}`,
+          body: '',
+          head: s.branch,
+          base: 'main',
+        });
+
+        socket.emit('session:pr-created', {
+          sessionId,
+          url: data.html_url,
+          prNumber: data.number,
+        });
+      } catch (err: any) {
+        socket.emit('session:error', { sessionId, error: err.message });
+      }
+    });
+
+    // ── Merge to main ────────────────────────────────────────
+    socket.on('session:merge-to-main', async ({ sessionId }: { sessionId: string }) => {
+      const s = getSession(sessionId);
+      if (!s || s.userId !== userId) return;
+      touchSession(sessionId);
+      try {
+        await mergeToMainSession(sessionId);
+        socket.emit('session:merged-to-main', {
+          sessionId,
+          url: `https://github.com/${s.repoFullName}`,
         });
       } catch (err: any) {
         socket.emit('session:error', { sessionId, error: err.message });

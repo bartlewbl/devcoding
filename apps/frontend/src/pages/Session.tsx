@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { GitBranch, Upload, Square, ArrowLeft, TerminalSquare, MessageSquare, Zap, Clock, CheckCircle, XCircle } from 'lucide-react';
+import { GitBranch, Upload, Square, ArrowLeft, TerminalSquare, MessageSquare, Zap, Clock, CheckCircle, XCircle, ChevronDown, GitPullRequest, GitMerge } from 'lucide-react';
 import { useSocket } from '../hooks/useSocket';
 import Terminal from '../components/Terminal';
 import ChatPanel from '../components/ChatPanel';
@@ -31,10 +31,14 @@ export default function Session() {
   const [files, setFiles] = useState<string[]>([]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [diff, setDiff] = useState<string>('');
-  const [pushing, setPushing] = useState(false);
   const [pushUrl, setPushUrl] = useState<string | null>(null);
-  const [spawnError, setSpawnError] = useState<string | null>(null);
+  const [prUrl, setPrUrl] = useState<string | null>(null);
+  const [mergedToMain, setMergedToMain] = useState(false);
+  const [actionInProgress, setActionInProgress] = useState<string | null>(null);
+  const [showMenu, setShowMenu] = useState(false);
+  const [sessionError, setSessionError] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -46,6 +50,19 @@ export default function Session() {
   useEffect(() => {
     api.get<SessionSummary[]>('/sessions').then((r) => setAllSessions(r.data));
   }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setShowMenu(false);
+      }
+    };
+
+    if (showMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showMenu]);
 
   useEffect(() => {
     if (!socket) return;
@@ -73,7 +90,15 @@ export default function Session() {
     });
 
     socket.on('session:pushed', ({ sessionId: sid, url }: { sessionId: string; url: string }) => {
-      if (sid === sessionId) { setPushUrl(url); setPushing(false); }
+      if (sid === sessionId) { setPushUrl(url); setActionInProgress(null); }
+    });
+
+    socket.on('session:pr-created', ({ sessionId: sid, url }: { sessionId: string; url: string }) => {
+      if (sid === sessionId) { setPrUrl(url); setActionInProgress(null); }
+    });
+
+    socket.on('session:merged-to-main', ({ sessionId: sid }: { sessionId: string }) => {
+      if (sid === sessionId) { setMergedToMain(true); setActionInProgress(null); }
     });
 
     socket.on('session:ended', ({ sessionId: sid }: { sessionId: string }) => {
@@ -86,13 +111,15 @@ export default function Session() {
     });
 
     socket.on('session:error', ({ sessionId: sid, error }: { sessionId?: string; error: string }) => {
-      if (!sid || sid === sessionId) setSpawnError(error);
+      if (!sid || sid === sessionId) setSessionError(error);
     });
 
     return () => {
       socket.off('files:update');
       socket.off('diff:update');
       socket.off('session:pushed');
+      socket.off('session:pr-created');
+      socket.off('session:merged-to-main');
       socket.off('session:ended');
     };
   }, [socket, sessionId, selectedFile]);
@@ -106,8 +133,23 @@ export default function Session() {
 
   const pushBranch = () => {
     if (!socket || !sessionId) return;
-    setPushing(true);
+    setActionInProgress('push');
     socket.emit('session:push', { sessionId });
+    setShowMenu(false);
+  };
+
+  const createPR = () => {
+    if (!socket || !sessionId) return;
+    setActionInProgress('pr');
+    socket.emit('session:create-pr', { sessionId });
+    setShowMenu(false);
+  };
+
+  const mergeToMain = () => {
+    if (!socket || !sessionId) return;
+    setActionInProgress('merge');
+    socket.emit('session:merge-to-main', { sessionId });
+    setShowMenu(false);
   };
 
   const endSession = () => {
@@ -126,9 +168,9 @@ export default function Session() {
 
   return (
     <div className="h-screen bg-zinc-950 text-zinc-100 flex flex-col">
-      {spawnError && (
+      {sessionError && (
         <div className="bg-red-950 border-b border-red-800 text-red-300 text-xs px-4 py-2">
-          CLI error: {spawnError} — check backend logs and make sure <code className="font-mono">claude</code> / <code className="font-mono">kimi</code> / <code className="font-mono">codex</code> is installed and accessible.
+          Error: {sessionError}
         </div>
       )}
       {/* Header */}
@@ -146,21 +188,45 @@ export default function Session() {
         )}
 
         <div className="ml-auto flex items-center gap-2">
-          {pushUrl ? (
-            <a href={pushUrl} target="_blank" rel="noreferrer"
-              className="text-xs text-green-400 hover:text-green-300 underline">
-              Branch pushed ↗
-            </a>
-          ) : (
+          {pushUrl && <a href={pushUrl} target="_blank" rel="noreferrer" className="text-xs text-green-400 hover:text-green-300 underline">Branch pushed ↗</a>}
+          {prUrl && <a href={prUrl} target="_blank" rel="noreferrer" className="text-xs text-green-400 hover:text-green-300 underline">PR created ↗</a>}
+          {mergedToMain && <span className="text-xs text-green-400">Merged to main ✓</span>}
+
+          <div className="relative" ref={menuRef}>
             <button
-              onClick={pushBranch}
-              disabled={pushing || session.status === 'creating'}
+              onClick={() => setShowMenu(!showMenu)}
+              disabled={actionInProgress !== null || session.status === 'creating'}
               className="flex items-center gap-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 rounded-lg px-3 py-1.5 transition-colors disabled:opacity-40"
             >
               <Upload size={12} />
-              {pushing ? 'Pushing…' : 'Push Branch'}
+              {actionInProgress === 'push' ? 'Pushing…' : actionInProgress === 'pr' ? 'Creating PR…' : actionInProgress === 'merge' ? 'Merging…' : 'Git Actions'}
+              <ChevronDown size={12} />
             </button>
-          )}
+
+            {showMenu && (
+              <div className="absolute right-0 mt-1 bg-zinc-800 border border-zinc-700 rounded-lg shadow-lg z-50 min-w-48">
+                <button
+                  onClick={pushBranch}
+                  className="w-full text-left px-4 py-2 text-xs text-zinc-100 hover:bg-zinc-700 flex items-center gap-2 first:rounded-t-lg"
+                >
+                  <Upload size={12} /> Push Branch
+                </button>
+                <button
+                  onClick={createPR}
+                  className="w-full text-left px-4 py-2 text-xs text-zinc-100 hover:bg-zinc-700 flex items-center gap-2"
+                >
+                  <GitPullRequest size={12} /> Create PR
+                </button>
+                <button
+                  onClick={mergeToMain}
+                  className="w-full text-left px-4 py-2 text-xs text-zinc-100 hover:bg-zinc-700 flex items-center gap-2 last:rounded-b-lg"
+                >
+                  <GitMerge size={12} /> Push to Main
+                </button>
+              </div>
+            )}
+          </div>
+
           <button
             onClick={endSession}
             className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-red-400 transition-colors px-2 py-1.5"
@@ -273,19 +339,28 @@ export default function Session() {
           <div className="flex-1 min-h-0 overflow-y-auto py-2">
             <FileTree files={files} selected={selectedFile} onSelect={onFileSelect} />
           </div>
-
-          {selectedFile && (
-            <>
-              <div className="px-4 py-2 border-t border-zinc-900 border-b">
-                <span className="font-mono text-xs text-zinc-500 truncate block">{selectedFile}</span>
-              </div>
-              <div className="flex-1 min-h-0 overflow-auto">
-                <DiffViewer diff={diff} />
-              </div>
-            </>
-          )}
         </div>
       </div>
+
+      {/* Code diff modal */}
+      {selectedFile && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setSelectedFile(null)}>
+          <div className="bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl flex flex-col max-w-4xl w-11/12 h-5/6 max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
+              <span className="font-mono text-sm text-zinc-100">{selectedFile}</span>
+              <button
+                onClick={() => setSelectedFile(null)}
+                className="text-zinc-500 hover:text-zinc-300 transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="flex-1 min-h-0 overflow-auto">
+              <DiffViewer diff={diff} />
+            </div>
+          </div>
+        </div>
+      )}
 
       {showNew && (
         <NewSessionModal

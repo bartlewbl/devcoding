@@ -85,4 +85,35 @@ router.get('/repos', authMiddleware, async (req, res) => {
   })));
 });
 
+router.post('/create-pr', authMiddleware, async (req, res) => {
+  const token = githubTokens.get(req.userId!);
+  if (!token) { res.status(401).json({ error: 'GitHub not connected' }); return; }
+
+  const { repoFullName, title, body, head, base } = req.body;
+  if (!repoFullName || !title || !head || !base) {
+    res.status(400).json({ error: 'Missing required fields' });
+    return;
+  }
+
+  try {
+    const octokit = new Octokit({ auth: token });
+    const [owner, repo] = repoFullName.split('/');
+    const { data } = await octokit.pulls.create({
+      owner,
+      repo,
+      title,
+      body: body || '',
+      head,
+      base,
+    });
+
+    res.json({
+      url: data.html_url,
+      prNumber: data.number,
+    });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 export default router;

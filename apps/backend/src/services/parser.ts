@@ -2,7 +2,7 @@ import { Terminal } from '@xterm/headless';
 import { CLIProvider } from '../types';
 
 export { CLIProvider };
-export type ParsedChunkType = 'tool-call' | 'ai-text' | 'system';
+export type ParsedChunkType = 'tool-call' | 'tool-result' | 'ai-text' | 'system';
 
 export interface ParsedChunk {
   type: ParsedChunkType;
@@ -88,8 +88,9 @@ const PROVIDER_CONFIGS: Record<CLIProvider, ProviderConfig> = {
       /^\s*⏺\s*$/,                    // lone bullet
     ],
     usagePatterns: [
-      /\$[\d,]+\.\d+\s*(?:USD)?/i,
-      /[\d,]+\s*(?:tokens?|input|output)/i,
+      /\$[\d,]+(?:\.\d+)?\s*(?:USD)?/i,
+      /[\d,]+(?:\.\d+)?[kKmMbB]?\s*(?:tokens?|input|output|prompt|completion|cache)/i,
+      /\b(?:input|output|prompt|completion)\s*(?:tokens?)?\s*[:=]/i,
       /^Now usi/i,
       /extra usage/i,
       /anthropic\s*cost/i,
@@ -122,10 +123,9 @@ const PROVIDER_CONFIGS: Record<CLIProvider, ProviderConfig> = {
       /^\s*\(ctrl\+/i,
     ],
     usagePatterns: [
-      /\$[\d,]+\.\d+/i,
-      /[\d,]+\s*(?:tokens?|input|output)/i,
-      /usage/i,
-      /cost/i,
+      /\$[\d,]+(?:\.\d+)?\s*(?:USD)?/i,
+      /[\d,]+(?:\.\d+)?[kKmMbB]?\s*(?:tokens?|input|output|prompt|completion|cache)/i,
+      /\b(?:input|output|prompt|completion)\s*(?:tokens?)?\s*[:=]\s*[\d,]/i,
     ],
     bulletChars: '●·',
   },
@@ -155,10 +155,9 @@ const PROVIDER_CONFIGS: Record<CLIProvider, ProviderConfig> = {
       /^\$\s+/,                        // shell prompt noise
     ],
     usagePatterns: [
-      /\$[\d,]+\.\d+/i,
-      /[\d,]+\s*(?:tokens?|input|output)/i,
-      /usage/i,
-      /cost/i,
+      /\$[\d,]+(?:\.\d+)?\s*(?:USD)?/i,
+      /[\d,]+(?:\.\d+)?[kKmMbB]?\s*(?:tokens?|input|output|prompt|completion|cache)/i,
+      /\b(?:input|output|prompt|completion)\s*(?:tokens?)?\s*[:=]\s*[\d,]/i,
     ],
     bulletChars: '·',
   },
@@ -191,17 +190,30 @@ function isGarbage(t: string): boolean {
 }
 
 // ── Tool call detection ───────────────────────────────────────────────────────
+// Matches tool result continuation markers (box-drawing / arrow chars at line start).
+// Example: "⎿ Read 50 lines" or "└ Updated 3 files".
+const RESULT_MARKER_RE = /^[⎿└↳]\s*/u;
+
 function createIsToolCall(config: ProviderConfig) {
-  const TOOL_RE = new RegExp(`^(${config.toolPrefixes.join('|')})`, 'i');
+  const TOOL_RE = new RegExp(`^(${config.toolPrefixes.join('|')})\\b`, 'i');
+  const PAREN_RE = new RegExp(`^(${config.toolPrefixes.join('|')})\\s*\\(`, 'i');
   const ARROW_RE = /[›>⟩]\s*$/;
 
   return (t: string) => {
-    if (!ARROW_RE.test(t) || !TOOL_RE.test(t)) return false;
-    return true;
+    // Paren form: "Read(file_path: "...")" — most common Claude/Codex form.
+    if (PAREN_RE.test(t)) return true;
+    // Arrow form: "Read some-file ›" — older Claude render.
+    if (ARROW_RE.test(t) && TOOL_RE.test(t)) return true;
+    return false;
   };
 }
 
-function toolName(t: string) { return t.replace(/[\u203A>]\s*$/, '').trim().split(/\s+/).slice(0, 4).join(' '); }
+function toolName(t: string): string {
+  const stripped = t.replace(/[\u203A>\u27E9]\s*$/, '').trim();
+  const parenMatch = stripped.match(/^([A-Z][A-Za-z0-9_]*)\s*\(/);
+  if (parenMatch) return parenMatch[1];
+  return stripped.split(/\s+/).slice(0, 3).join(' ');
+}
 
 const SUMMARY_RE = /^(Read|Listed|Searched|Ran|Wrote|Created|Edited|Fetched)\s+\d+/i;
 function isToolSummary(t: string) { return SUMMARY_RE.test(t); }
@@ -348,6 +360,7 @@ export class OutputParser {
   // Sliding-window extraction state
   private seenHashes = new Set<string>();
   private lastCursorY = 0;
+  private lastToolName?: string;
   private isNoise: (t: string) => boolean;
   private isUsage: (t: string) => boolean;
   private isToolCall: (t: string) => boolean;
@@ -433,6 +446,7 @@ export class OutputParser {
     if (!freshLines.length) return;
 
     const config = PROVIDER_CONFIGS[this.provider] || PROVIDER_CONFIGS.claude;
+    const bulletRe = new RegExp(`^[${config.bulletChars}]\\s+`, 'u');
     let textLines: string[] = [];
     const flushText = () => {
       if (textLines.length) {
@@ -444,7 +458,22 @@ export class OutputParser {
       }
     };
 
-    for (const t of freshLines) {
+    for (const rawT of freshLines) {
+      // Detect tool-result continuation lines (e.g. "⎿ Read 50 lines") before
+      // stripping anything — these are structural markers we want to preserve.
+      if (RESULT_MARKER_RE.test(rawT)) {
+        const result = rawT.replace(RESULT_MARKER_RE, '').trim();
+        if (result) {
+          flushText();
+          this.onParsed({ type: 'tool-result', content: result, toolName: this.lastToolName });
+        }
+        continue;
+      }
+
+      // Strip provider bullet prefix so tool detection sees the raw content.
+      const t = rawT.replace(bulletRe, '').trim();
+      if (!t) continue;
+
       // Check for usage data before treating as noise
       if (this.isUsage(t)) {
         this.onUsage?.({ provider: this.provider, rawLine: t });
@@ -456,10 +485,14 @@ export class OutputParser {
 
       if (this.isToolCall(t)) {
         flushText();
-        this.onParsed({ type: 'tool-call', content: t, toolName: toolName(t) });
+        const name = toolName(t);
+        this.lastToolName = name;
+        this.onParsed({ type: 'tool-call', content: t, toolName: name });
       } else if (isToolSummary(t)) {
         flushText();
-        this.onParsed({ type: 'tool-call', content: t + ' ›', toolName: toolName(t + ' ›') });
+        const name = toolName(t);
+        this.lastToolName = name;
+        this.onParsed({ type: 'tool-call', content: t, toolName: name });
       } else {
         textLines.push(t);
       }
