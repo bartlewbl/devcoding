@@ -4,7 +4,7 @@ set -e
 APP_DIR="/var/www/ai-code-studio"
 BACKEND_DIR="$APP_DIR/apps/backend"
 
-echo "=== Deploying AI Code Studio Backend ==="
+echo "=== Deploying bartlew code Backend ==="
 
 cd "$APP_DIR"
 
