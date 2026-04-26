@@ -192,6 +192,8 @@ export function spawnCLI(
     }
   } else if (session.model === 'codex' && session.modelName) {
     args.push('--model', session.modelName);
+  } else if (session.model === 'kimi') {
+    args.push('--yolo');
   }
   // Kimi uses default_model from ~/.kimi/config.toml — passing --model breaks OAuth login
 
