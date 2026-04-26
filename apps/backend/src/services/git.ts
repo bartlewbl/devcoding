@@ -90,6 +90,21 @@ export async function pushBranch(worktreePath: string, branch: string): Promise<
 export async function mergeToMain(repoPath: string, worktreePath: string, branch: string): Promise<void> {
   await pushBranch(worktreePath, branch);
 
+  // Pull latest main into the feature branch first so the final merge is conflict-free
+  const worktreeGit = simpleGit(worktreePath);
+  await worktreeGit.fetch(['origin', 'main']);
+  try {
+    await worktreeGit.merge(['origin/main']);
+  } catch (err: any) {
+    const status = await worktreeGit.status().catch(() => null);
+    if (status && status.conflicted.length > 0) {
+      await worktreeGit.merge(['--abort']).catch(() => null);
+      throw new Error(`Merge conflicts in ${status.conflicted.join(', ')}. Please create a PR and resolve manually.`);
+    }
+    throw err;
+  }
+  await worktreeGit.push(['origin', branch]);
+
   const git = simpleGit(repoPath);
   await git.fetch(['origin', 'main']);
 
@@ -103,7 +118,7 @@ export async function mergeToMain(repoPath: string, worktreePath: string, branch
 
   try {
     await git.checkout('main');
-    await git.pull();
+    await git.pull('origin', 'main');
     await git.merge([branch]);
   } catch (err: any) {
     const status = await git.status().catch(() => null);

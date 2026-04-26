@@ -11,10 +11,11 @@ import githubRoutes from './routes/github';
 import sessionRoutes from './routes/sessions';
 import worktreeRoutes from './routes/worktrees';
 import usageRoutes from './routes/usage';
+import kimiRoutes from './routes/kimi';
 import { authMiddleware } from './middleware/auth';
 import { setupWebSocketHandler } from './ws/handler';
 import { reconcileWorktreesOnStartup } from './services/worktree-manager';
-import { getActiveSessionIds, initSessions } from './services/session';
+import { getActiveSessionIds, initSessions, persistSessions } from './services/session';
 import { startBackgroundUpdater } from './services/updater';
 
 const app = express();
@@ -35,6 +36,7 @@ app.use('/api/github', githubRoutes);
 app.use('/api/sessions', authMiddleware, sessionRoutes);
 app.use('/api/worktrees', authMiddleware, worktreeRoutes);
 app.use('/api/usage', authMiddleware, usageRoutes);
+app.use('/api/kimi', authMiddleware, kimiRoutes);
 
 setupWebSocketHandler(io);
 
@@ -45,4 +47,16 @@ const PORT = process.env.PORT || 3001;
 httpServer.listen(PORT, () => {
   console.log(`Backend running on http://localhost:${PORT}`);
   reconcileWorktreesOnStartup(getActiveSessionIds());
+});
+
+// Graceful shutdown: persist sessions before exiting
+process.on('SIGTERM', () => {
+  console.log('[shutdown] SIGTERM received, persisting sessions…');
+  persistSessions();
+  process.exit(0);
+});
+process.on('SIGINT', () => {
+  console.log('[shutdown] SIGINT received, persisting sessions…');
+  persistSessions();
+  process.exit(0);
 });

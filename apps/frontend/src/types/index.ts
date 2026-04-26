@@ -10,6 +10,7 @@ export interface SessionSummary {
   repoFullName: string;
   createdAt: number;
   lastActivityAt: number;
+  name?: string;
 }
 
 export interface ChatMessage {

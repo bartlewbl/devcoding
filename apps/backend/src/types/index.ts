@@ -23,6 +23,7 @@ export interface Session {
   lastActivityAt: number;
   stoppedAt?: number;
   messages: ChatMessage[];
+  name?: string;
   pty?: IPty;
   watcher?: FSWatcher;
   parser?: OutputParser;
@@ -38,6 +39,7 @@ export interface SessionSummary {
   lastActivityAt: number;
   repoFullName: string;
   createdAt: number;
+  name?: string;
 }
 
 export interface ChatMessage {

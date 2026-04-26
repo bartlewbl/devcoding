@@ -13,7 +13,9 @@ import {
   XCircle,
 } from 'lucide-react';
 import api from '../lib/api';
-import { UsageRecord, UsageStats } from '../types/usage';
+import { UsageRecord, UsageStats, DailyUsage } from '../types/usage';
+import ModelUsageCharts from '../components/ModelUsageCharts';
+import DailyUsageCharts from '../components/DailyUsageCharts';
 
 function formatNumber(n?: number): string {
   if (n === undefined || n === null || isNaN(n)) return '-';
@@ -45,6 +47,7 @@ export default function Usage() {
   const navigate = useNavigate();
   const [records, setRecords] = useState<UsageRecord[]>([]);
   const [stats, setStats] = useState<UsageStats | null>(null);
+  const [daily, setDaily] = useState<DailyUsage[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -58,13 +61,15 @@ export default function Usage() {
       const params: Record<string, string> = {};
       if (filterProvider !== 'all') params.provider = filterProvider;
 
-      const [recordsRes, statsRes] = await Promise.all([
+      const [recordsRes, statsRes, dailyRes] = await Promise.all([
         api.get<UsageRecord[]>('/usage', { params }),
         api.get<UsageStats>('/usage/stats', { params }),
+        api.get<DailyUsage[]>('/usage/daily', { params }),
       ]);
 
       setRecords(recordsRes.data);
       setStats(statsRes.data);
+      setDaily(dailyRes.data);
     } catch (err: any) {
       setError(err.response?.data?.error || err.message);
     } finally {
@@ -189,6 +194,14 @@ export default function Usage() {
               </div>
             ))}
           </div>
+        )}
+
+        {/* Daily usage charts */}
+        {daily.length > 0 && <DailyUsageCharts data={daily} />}
+
+        {/* Model usage charts */}
+        {stats && Object.keys(stats.byModel).length > 0 && (
+          <ModelUsageCharts stats={stats} />
         )}
 
         {/* Filters & Actions */}

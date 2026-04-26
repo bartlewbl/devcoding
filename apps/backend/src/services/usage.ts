@@ -1,42 +1,86 @@
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import { UsageRecord, UsageStats, UsageFilter, ProviderStats, ModelStats } from '../types/usage';
+import { getDb } from '../db';
+import { UsageRecord, UsageStats, UsageFilter, ProviderStats, ModelStats, DailyUsage } from '../types/usage';
 
 const DATA_DIR = path.resolve(__dirname, '../../.data');
-const USAGE_FILE = path.join(DATA_DIR, 'usage.json');
+const OLD_USAGE_FILE = path.join(DATA_DIR, 'usage.json');
 
-// In-memory cache
-let records: UsageRecord[] = [];
-let loaded = false;
+let migrated = false;
 
-function load(): void {
-  if (loaded) return;
-  if (!fs.existsSync(USAGE_FILE)) {
-    records = [];
-    loaded = true;
-    return;
-  }
+function migrateUsageFromJson(): void {
+  if (migrated) return;
+  migrated = true;
+  if (!fs.existsSync(OLD_USAGE_FILE)) return;
   try {
-    const raw = fs.readFileSync(USAGE_FILE, 'utf-8');
+    const raw = fs.readFileSync(OLD_USAGE_FILE, 'utf-8');
     const data = JSON.parse(raw) as UsageRecord[];
-    records = Array.isArray(data) ? data : [];
+    if (!Array.isArray(data) || data.length === 0) {
+      fs.renameSync(OLD_USAGE_FILE, `${OLD_USAGE_FILE}.migrated`);
+      return;
+    }
+    const insert = getDb().prepare(`
+      INSERT OR IGNORE INTO usage
+      (id, sessionId, userId, provider, modelName, timestamp, inputTokens, outputTokens, totalTokens, costUsd, rawLine)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const migrate = getDb().transaction((rows: UsageRecord[]) => {
+      for (const r of rows) {
+        insert.run(
+          r.id,
+          r.sessionId,
+          r.userId,
+          r.provider,
+          r.modelName ?? null,
+          r.timestamp,
+          r.inputTokens ?? null,
+          r.outputTokens ?? null,
+          r.totalTokens ?? null,
+          r.costUsd ?? null,
+          r.rawLine
+        );
+      }
+    });
+    migrate(data);
+    fs.renameSync(OLD_USAGE_FILE, `${OLD_USAGE_FILE}.migrated`);
+    console.log(`[usage] migrated ${data.length} usage record(s) from JSON to SQLite`);
   } catch (err) {
-    console.error('[usage] failed to load usage records:', err);
-    records = [];
+    console.error('[usage] JSON migration failed:', err);
   }
-  loaded = true;
 }
 
-function save(): void {
-  try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-    fs.writeFileSync(USAGE_FILE, JSON.stringify(records, null, 2));
-  } catch (err) {
-    console.error('[usage] failed to save usage records:', err);
+function buildFilterWhere(filter?: UsageFilter): { where: string; params: any[] } {
+  const conditions: string[] = [];
+  const params: any[] = [];
+
+  if (filter?.userId) {
+    conditions.push('userId = ?');
+    params.push(filter.userId);
   }
+  if (filter?.sessionId) {
+    conditions.push('sessionId = ?');
+    params.push(filter.sessionId);
+  }
+  if (filter?.provider) {
+    conditions.push('provider = ?');
+    params.push(filter.provider);
+  }
+  if (filter?.modelName) {
+    conditions.push('modelName = ?');
+    params.push(filter.modelName);
+  }
+  if (filter?.startTime !== undefined) {
+    conditions.push('timestamp >= ?');
+    params.push(filter.startTime);
+  }
+  if (filter?.endTime !== undefined) {
+    conditions.push('timestamp <= ?');
+    params.push(filter.endTime);
+  }
+
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  return { where, params };
 }
 
 export function recordUsage(
@@ -46,11 +90,9 @@ export function recordUsage(
   modelName: string | undefined,
   rawLine: string
 ): UsageRecord | undefined {
-  load();
+  migrateUsageFromJson();
 
   const parsed = parseUsageLine(rawLine);
-  // Only persist records that actually contain numeric usage data —
-  // otherwise lines that merely mention "cost" or "usage" create empty ghost records.
   if (!parsed) return undefined;
 
   const record: UsageRecord = {
@@ -64,126 +106,169 @@ export function recordUsage(
     ...parsed,
   };
 
-  records.push(record);
+  getDb().prepare(`
+    INSERT INTO usage
+    (id, sessionId, userId, provider, modelName, timestamp, inputTokens, outputTokens, totalTokens, costUsd, rawLine)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    record.id,
+    record.sessionId,
+    record.userId,
+    record.provider,
+    record.modelName ?? null,
+    record.timestamp,
+    record.inputTokens ?? null,
+    record.outputTokens ?? null,
+    record.totalTokens ?? null,
+    record.costUsd ?? null,
+    record.rawLine
+  );
 
-  // Keep only the last 50,000 records to prevent unbounded growth
-  if (records.length > 50_000) {
-    records = records.slice(-40_000);
+  // Prune: keep last 40,000 when exceeding 50,000
+  const countRow = getDb().prepare('SELECT COUNT(*) as count FROM usage').get() as { count: number };
+  if (countRow.count > 50_000) {
+    const threshold = getDb().prepare(
+      'SELECT timestamp FROM usage ORDER BY timestamp DESC LIMIT 1 OFFSET 40000'
+    ).get() as { timestamp: number } | undefined;
+    if (threshold) {
+      getDb().prepare('DELETE FROM usage WHERE timestamp < ?').run(threshold.timestamp);
+    }
   }
 
-  save();
   return record;
 }
 
 export function getUsage(filter?: UsageFilter): UsageRecord[] {
-  load();
-  let result = [...records];
+  migrateUsageFromJson();
+  const { where, params } = buildFilterWhere(filter);
+  const sql = `SELECT * FROM usage ${where} ORDER BY timestamp DESC`;
+  const rows = getDb().prepare(sql).all(...params) as any[];
 
-  if (filter?.userId) {
-    result = result.filter((r) => r.userId === filter.userId);
-  }
-  if (filter?.sessionId) {
-    result = result.filter((r) => r.sessionId === filter.sessionId);
-  }
-  if (filter?.provider) {
-    result = result.filter((r) => r.provider === filter.provider);
-  }
-  if (filter?.modelName) {
-    result = result.filter((r) => r.modelName === filter.modelName);
-  }
-  if (filter?.startTime !== undefined) {
-    result = result.filter((r) => r.timestamp >= filter.startTime!);
-  }
-  if (filter?.endTime !== undefined) {
-    result = result.filter((r) => r.timestamp <= filter.endTime!);
-  }
-
-  // Sort by timestamp descending
-  return result.sort((a, b) => b.timestamp - a.timestamp);
+  return rows.map((r) => ({
+    id: r.id,
+    sessionId: r.sessionId,
+    userId: r.userId,
+    provider: r.provider,
+    modelName: r.modelName ?? undefined,
+    timestamp: r.timestamp,
+    inputTokens: r.inputTokens ?? undefined,
+    outputTokens: r.outputTokens ?? undefined,
+    totalTokens: r.totalTokens ?? undefined,
+    costUsd: r.costUsd ?? undefined,
+    rawLine: r.rawLine,
+  }));
 }
 
 export function getUsageStats(filter?: UsageFilter): UsageStats {
-  const filtered = getUsage(filter);
+  const { where, params } = buildFilterWhere(filter);
+
+  const totalRow = getDb().prepare(`
+    SELECT COUNT(*) as totalRecords,
+           COALESCE(SUM(inputTokens), 0) as totalInputTokens,
+           COALESCE(SUM(outputTokens), 0) as totalOutputTokens,
+           COALESCE(SUM(totalTokens), 0) as totalTokens,
+           COALESCE(SUM(costUsd), 0) as totalCostUsd
+    FROM usage ${where}
+  `).get(...params) as any;
+
+  const providerRows = getDb().prepare(`
+    SELECT provider,
+           COUNT(*) as records,
+           COALESCE(SUM(inputTokens), 0) as inputTokens,
+           COALESCE(SUM(outputTokens), 0) as outputTokens,
+           COALESCE(SUM(totalTokens), 0) as totalTokens,
+           COALESCE(SUM(costUsd), 0) as costUsd
+    FROM usage ${where}
+    GROUP BY provider
+  `).all(...params) as any[];
+
+  const modelRows = getDb().prepare(`
+    SELECT COALESCE(modelName, provider || '-default') as model,
+           provider,
+           COUNT(*) as records,
+           COALESCE(SUM(inputTokens), 0) as inputTokens,
+           COALESCE(SUM(outputTokens), 0) as outputTokens,
+           COALESCE(SUM(totalTokens), 0) as totalTokens,
+           COALESCE(SUM(costUsd), 0) as costUsd
+    FROM usage ${where}
+    GROUP BY COALESCE(modelName, provider || '-default'), provider
+  `).all(...params) as any[];
 
   const byProvider: Record<string, ProviderStats> = {};
+  for (const r of providerRows) {
+    byProvider[r.provider] = {
+      provider: r.provider,
+      records: r.records,
+      inputTokens: r.inputTokens,
+      outputTokens: r.outputTokens,
+      totalTokens: r.totalTokens,
+      costUsd: r.costUsd,
+    };
+  }
+
   const byModel: Record<string, ModelStats> = {};
-
-  let totalInputTokens = 0;
-  let totalOutputTokens = 0;
-  let totalTokens = 0;
-  let totalCostUsd = 0;
-
-  for (const r of filtered) {
-    totalInputTokens += r.inputTokens || 0;
-    totalOutputTokens += r.outputTokens || 0;
-    totalTokens += r.totalTokens || 0;
-    totalCostUsd += r.costUsd || 0;
-
-    const pKey = r.provider;
-    if (!byProvider[pKey]) {
-      byProvider[pKey] = {
-        provider: r.provider,
-        records: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        totalTokens: 0,
-        costUsd: 0,
-      };
-    }
-    byProvider[pKey].records++;
-    byProvider[pKey].inputTokens += r.inputTokens || 0;
-    byProvider[pKey].outputTokens += r.outputTokens || 0;
-    byProvider[pKey].totalTokens += r.totalTokens || 0;
-    byProvider[pKey].costUsd += r.costUsd || 0;
-
-    const mKey = r.modelName || `${r.provider}-default`;
-    if (!byModel[mKey]) {
-      byModel[mKey] = {
-        model: mKey,
-        provider: r.provider,
-        records: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        totalTokens: 0,
-        costUsd: 0,
-      };
-    }
-    byModel[mKey].records++;
-    byModel[mKey].inputTokens += r.inputTokens || 0;
-    byModel[mKey].outputTokens += r.outputTokens || 0;
-    byModel[mKey].totalTokens += r.totalTokens || 0;
-    byModel[mKey].costUsd += r.costUsd || 0;
+  for (const r of modelRows) {
+    byModel[r.model] = {
+      model: r.model,
+      provider: r.provider,
+      records: r.records,
+      inputTokens: r.inputTokens,
+      outputTokens: r.outputTokens,
+      totalTokens: r.totalTokens,
+      costUsd: r.costUsd,
+    };
   }
 
   return {
-    totalRecords: filtered.length,
-    totalInputTokens,
-    totalOutputTokens,
-    totalTokens,
-    totalCostUsd,
+    totalRecords: totalRow.totalRecords,
+    totalInputTokens: totalRow.totalInputTokens,
+    totalOutputTokens: totalRow.totalOutputTokens,
+    totalTokens: totalRow.totalTokens,
+    totalCostUsd: totalRow.totalCostUsd,
     byProvider,
     byModel,
   };
 }
 
+export function getDailyUsage(filter?: UsageFilter): DailyUsage[] {
+  migrateUsageFromJson();
+  const { where, params } = buildFilterWhere(filter);
+
+  const sql = `
+    SELECT date(timestamp/1000, 'unixepoch') as day,
+           COUNT(*) as records,
+           COALESCE(SUM(inputTokens), 0) as inputTokens,
+           COALESCE(SUM(outputTokens), 0) as outputTokens,
+           COALESCE(SUM(totalTokens), 0) as totalTokens,
+           COALESCE(SUM(costUsd), 0) as costUsd
+    FROM usage ${where}
+    GROUP BY day
+    ORDER BY day ASC
+  `;
+
+  const rows = getDb().prepare(sql).all(...params) as any[];
+  return rows.map((r) => ({
+    day: r.day,
+    records: r.records,
+    inputTokens: r.inputTokens,
+    outputTokens: r.outputTokens,
+    totalTokens: r.totalTokens,
+    costUsd: r.costUsd,
+  }));
+}
+
 export function deleteUsageForSession(sessionId: string): number {
-  load();
-  const before = records.length;
-  records = records.filter((r) => r.sessionId !== sessionId);
-  const removed = before - records.length;
-  if (removed > 0) save();
-  return removed;
+  migrateUsageFromJson();
+  const result = getDb().prepare('DELETE FROM usage WHERE sessionId = ?').run(sessionId);
+  return result.changes;
 }
 
 export function clearAllUsage(): void {
-  load();
-  records = [];
-  save();
+  migrateUsageFromJson();
+  getDb().prepare('DELETE FROM usage').run();
 }
 
 // ── Usage parsing ─────────────────────────────────────────────────────────────
-// Providers print tokens in varying shapes; we parse the union so the same
-// logic works for Claude Code, Kimi, and Codex without per-provider branches.
 
 interface ParsedUsage {
   inputTokens?: number;
@@ -192,10 +277,8 @@ interface ParsedUsage {
   costUsd?: number;
 }
 
-// Matches a numeric literal like "15", "1,234", "15.2", "15.2k", "1.5M".
 const NUM = String.raw`\d[\d,]*(?:\.\d+)?[kKmMbB]?`;
 
-// Parse a numeric token string honoring comma separators and k/M/B suffixes.
 function parseTokenCount(raw: string): number | undefined {
   const m = raw.trim().replace(/,/g, '').match(/^(\d+(?:\.\d+)?)\s*([kKmMbB]?)$/);
   if (!m) return undefined;
@@ -209,8 +292,6 @@ function parseTokenCount(raw: string): number | undefined {
   }
 }
 
-// Extract a token count for a field given its synonyms. Tries both the
-// trailing form ("123k input") and the labeled form ("input: 123k").
 function extractTokenField(line: string, synonyms: string[]): number | undefined {
   const group = synonyms.join('|');
   const trailing = new RegExp(`(${NUM})\\s*(?:tokens?\\s+)?(?:${group})\\b`, 'i');
@@ -223,7 +304,6 @@ function parseUsageLine(line: string): ParsedUsage | undefined {
   const result: ParsedUsage = {};
   let hasValue = false;
 
-  // Cost: $0.12, $1,234.56, $0.1 USD
   const costMatch = line.match(/\$\s*([\d,]+(?:\.\d+)?)\s*(?:USD)?/i);
   if (costMatch) {
     const cost = parseFloat(costMatch[1].replace(/,/g, ''));
@@ -248,7 +328,6 @@ function parseUsageLine(line: string): ParsedUsage | undefined {
   if (result.inputTokens !== undefined || result.outputTokens !== undefined) {
     result.totalTokens = (result.inputTokens || 0) + (result.outputTokens || 0);
   } else {
-    // Fallback: "12,345 tokens" or "total tokens: 12.3k"
     const total =
       extractTokenField(line, ['total']) ??
       (() => {

@@ -9,9 +9,10 @@ interface Props {
   sessionId: string;
   socket: Socket;
   tab?: string;
+  status?: string;
 }
 
-export default function Terminal({ sessionId, socket, tab }: Props) {
+export default function Terminal({ sessionId, socket, tab, status }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -84,5 +85,17 @@ export default function Terminal({ sessionId, socket, tab }: Props) {
     return () => { socket.off('terminal:data', handler); };
   }, [sessionId, socket]);
 
-  return <div ref={containerRef} className="h-full w-full" />;
+  return (
+    <div className="h-full w-full relative">
+      <div ref={containerRef} className="h-full w-full" />
+      {status === 'stopped' && (
+        <div className="absolute inset-0 bg-zinc-950/80 backdrop-blur-sm flex items-center justify-center z-10">
+          <div className="text-center">
+            <div className="text-zinc-400 text-sm mb-1">Session stopped</div>
+            <div className="text-zinc-500 text-xs">Press Start to resume</div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }

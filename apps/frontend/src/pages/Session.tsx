@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { GitBranch, Upload, Square, ArrowLeft, TerminalSquare, MessageSquare, Zap, Clock, CheckCircle, XCircle, ChevronDown, GitPullRequest, GitMerge, Menu, FileCode } from 'lucide-react';
+import { GitBranch, Upload, Square, ArrowLeft, TerminalSquare, MessageSquare, Zap, Clock, CheckCircle, XCircle, ChevronDown, GitPullRequest, GitMerge, Menu, FileCode, Play, RotateCcw, Power, Pencil } from 'lucide-react';
 import { useSocket } from '../hooks/useSocket';
 import Terminal from '../components/Terminal';
 import ChatPanel from '../components/ChatPanel';
@@ -37,12 +37,16 @@ export default function Session() {
   const [mergedToMain, setMergedToMain] = useState(false);
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
   const [showMenu, setShowMenu] = useState(false);
+  const [showSessionMenu, setShowSessionMenu] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [showMobileLeft, setShowMobileLeft] = useState(false);
   const [showMobileRight, setShowMobileRight] = useState(false);
   const [authPrompt, setAuthPrompt] = useState<{ provider: 'claude' | 'kimi' | 'codex'; url: string; code?: string } | null>(null);
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
   const menuRef = useRef<HTMLDivElement>(null);
+  const sessionMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -60,13 +64,16 @@ export default function Session() {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setShowMenu(false);
       }
+      if (sessionMenuRef.current && !sessionMenuRef.current.contains(e.target as Node)) {
+        setShowSessionMenu(false);
+      }
     };
 
-    if (showMenu) {
+    if (showMenu || showSessionMenu) {
       document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
-  }, [showMenu]);
+  }, [showMenu, showSessionMenu]);
 
   useEffect(() => {
     if (!socket) return;
@@ -109,6 +116,14 @@ export default function Session() {
       if (sid === sessionId) setSession((s) => s ? { ...s, status: 'ended' } : s);
     });
 
+    socket.on('session:stopped', ({ sessionId: sid }: { sessionId: string }) => {
+      if (sid === sessionId) setSession((s) => s ? { ...s, status: 'stopped' } : s);
+    });
+
+    socket.on('session:started', ({ sessionId: sid }: { sessionId: string }) => {
+      if (sid === sessionId) setSession((s) => s ? { ...s, status: 'running' } : s);
+    });
+
     socket.on('session:updated', (summary: SessionSummary) => {
       if (summary.id === sessionId) setSession(summary);
       setAllSessions((prev) => prev.map((s) => (s.id === summary.id ? summary : s)));
@@ -129,6 +144,8 @@ export default function Session() {
       socket.off('session:pr-created');
       socket.off('session:merged-to-main');
       socket.off('session:ended');
+      socket.off('session:stopped');
+      socket.off('session:started');
       socket.off('session:auth-required');
     };
   }, [socket, sessionId, selectedFile]);
@@ -168,6 +185,16 @@ export default function Session() {
     navigate('/dashboard');
   };
 
+  const stopSession = () => {
+    if (!socket || !sessionId) return;
+    socket.emit('session:stop', { sessionId });
+  };
+
+  const startSession = () => {
+    if (!socket || !sessionId) return;
+    socket.emit('session:start', { sessionId });
+  };
+
   if (!socket || !session || !sessionId) {
     return (
       <div className="min-h-screen bg-zinc-950 flex items-center justify-center text-zinc-500">
@@ -202,7 +229,30 @@ export default function Session() {
           </button>
 
           <GitBranch size={14} className="text-zinc-500 hidden sm:block shrink-0" />
-          <span className="font-mono text-sm text-zinc-300 truncate min-w-0">{session.branch}</span>
+          {isRenaming ? (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                socket?.emit('session:rename', { sessionId, name: renameValue });
+                setIsRenaming(false);
+              }}
+              className="flex items-center gap-1 flex-1 min-w-0"
+            >
+              <input
+                autoFocus
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                onBlur={() => setIsRenaming(false)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') setIsRenaming(false);
+                }}
+                className="bg-zinc-950 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-100 outline-none focus:border-zinc-500 w-full max-w-xs"
+                placeholder={session.branch}
+              />
+            </form>
+          ) : (
+            <span className="font-mono text-sm text-zinc-300 truncate min-w-0">{session.name || session.branch}</span>
+          )}
 
           <div className="ml-auto flex items-center gap-2">
             {/* Mobile files toggle */}
@@ -229,7 +279,7 @@ export default function Session() {
               </button>
 
               {showMenu && (
-                <div className="absolute right-0 mt-1 bg-zinc-800 border border-zinc-700 rounded-lg shadow-lg z-50 min-w-48">
+                <div className="absolute right-0 mt-1 bg-zinc-800 border border-zinc-700 rounded-lg shadow-lg z-[60] min-w-48">
                   <button
                     onClick={pushBranch}
                     className="w-full text-left px-4 py-2 text-xs text-zinc-100 hover:bg-zinc-700 flex items-center gap-2 first:rounded-t-lg"
@@ -252,13 +302,54 @@ export default function Session() {
               )}
             </div>
 
-            <button
-              onClick={endSession}
-              className="flex items-center justify-center h-9 w-9 rounded-lg bg-zinc-900 text-zinc-500 hover:text-red-400 hover:bg-red-950/30 transition-colors shrink-0"
-              title="End session"
-            >
-              <Square size={16} />
-            </button>
+            <div className="relative" ref={sessionMenuRef}>
+              <button
+                onClick={() => setShowSessionMenu(!showSessionMenu)}
+                className="flex items-center justify-center h-9 px-3 gap-1.5 text-xs bg-zinc-900 hover:bg-zinc-800 rounded-lg transition-colors shrink-0"
+                title="Session actions"
+              >
+                <Power size={14} />
+                <span className="hidden sm:inline">Session</span>
+                <ChevronDown size={14} />
+              </button>
+
+              {showSessionMenu && (
+                <div className="absolute right-0 mt-1 bg-zinc-800 border border-zinc-700 rounded-lg shadow-lg z-[60] min-w-44">
+                  {session.status === 'running' && (
+                    <button
+                      onClick={() => { stopSession(); setShowSessionMenu(false); }}
+                      className="w-full text-left px-4 py-2 text-xs text-zinc-100 hover:bg-zinc-700 flex items-center gap-2 first:rounded-t-lg"
+                    >
+                      <Square size={12} /> Stop
+                    </button>
+                  )}
+                  {session.status === 'stopped' && (
+                    <button
+                      onClick={() => { startSession(); setShowSessionMenu(false); }}
+                      className="w-full text-left px-4 py-2 text-xs text-zinc-100 hover:bg-zinc-700 flex items-center gap-2 first:rounded-t-lg"
+                    >
+                      <Play size={12} /> Start
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      setRenameValue(session.name || '');
+                      setIsRenaming(true);
+                      setShowSessionMenu(false);
+                    }}
+                    className="w-full text-left px-4 py-2 text-xs text-zinc-100 hover:bg-zinc-700 flex items-center gap-2"
+                  >
+                    <Pencil size={12} /> Rename
+                  </button>
+                  <button
+                    onClick={() => { endSession(); setShowSessionMenu(false); }}
+                    className="w-full text-left px-4 py-2 text-xs text-red-400 hover:bg-red-950/30 flex items-center gap-2 last:rounded-b-lg"
+                  >
+                    <Square size={12} /> End Session
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -352,7 +443,7 @@ export default function Session() {
                                   <span className="ml-auto text-[10px] text-zinc-600">{s.modelName || s.model}</span>
                                 </div>
                                 <div className={`font-mono text-xs truncate ${isActive ? 'text-zinc-100' : 'text-zinc-300'}`}>
-                                  {s.branch}
+                                  {s.name || s.branch}
                                 </div>
                               </button>
                             );
@@ -389,7 +480,7 @@ export default function Session() {
               <ChatPanel sessionId={sessionId} socket={socket} model={session.model} />
             </div>
             <div className={`absolute inset-0 ${tab === 'terminal' ? '' : 'invisible pointer-events-none'}`}>
-              <Terminal sessionId={sessionId} socket={socket} tab={tab} />
+              <Terminal sessionId={sessionId} socket={socket} tab={tab} status={session.status} />
             </div>
           </div>
         </div>

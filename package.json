@@ -1,12 +1,16 @@
 {
   "name": "ai-code-studio",
   "private": true,
-  "workspaces": ["apps/backend", "apps/frontend"],
+  "workspaces": [
+    "apps/backend",
+    "apps/frontend"
+  ],
   "scripts": {
     "dev": "concurrently \"npm run dev --workspace=apps/backend\" \"npm run dev --workspace=apps/frontend\"",
     "build": "npm run build --workspace=apps/backend && npm run build --workspace=apps/frontend"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "concurrently": "^8.2.0"
   }
 }

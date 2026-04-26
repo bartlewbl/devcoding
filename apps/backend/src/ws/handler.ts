@@ -17,6 +17,8 @@ import {
   stopSession,
   addMessage,
   mergeToMainSession,
+  persistSessions,
+  renameSession,
 } from '../services/session';
 import { getDiff } from '../services/git';
 import { githubTokens } from '../routes/github';
@@ -25,8 +27,6 @@ import { ChatMessage } from '../types';
 import { detectAuthPrompt } from '../services/auth-detector';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
-const IDLE_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours
-const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;   // 5 minutes
 
 // Track auth URLs already emitted per session to avoid spam
 const emittedAuthUrls = new Map<string, Set<string>>();
@@ -163,6 +163,15 @@ export function setupWebSocketHandler(io: Server): void {
       io.to(userId).emit('session:updated', summary);
     });
 
+    // ── Rename session ───────────────────────────────────────
+    socket.on('session:rename', ({ sessionId, name }: { sessionId: string; name: string }) => {
+      const s = getSession(sessionId);
+      if (!s || s.userId !== userId) return;
+      const summary = renameSession(sessionId, name);
+      if (!summary) return;
+      io.to(userId).emit('session:updated', summary);
+    });
+
     // ── Reconnect: replay terminal buffer + chat history ─────
     socket.on('session:join', ({ sessionId }: { sessionId: string }) => {
       const s = getSession(sessionId);
@@ -176,42 +185,58 @@ export function setupWebSocketHandler(io: Server): void {
         socket.emit('chat:history', { sessionId, messages: s.messages });
       }
 
-      if (s.status === 'stopped') {
-        const restarted = restartSession(
-          sessionId,
-          (raw) => {
-            io.to(sessionId).emit('terminal:data', { sessionId, data: raw });
-            const auth = detectAuthPrompt(s.model, raw);
-            if (auth) {
-              const seen = emittedAuthUrls.get(sessionId) || new Set();
-              if (!seen.has(auth.url)) {
-                seen.add(auth.url);
-                emittedAuthUrls.set(sessionId, seen);
-                io.to(sessionId).emit('session:auth-required', { sessionId, ...auth });
-              }
-            }
-          },
-          (chunk) => {
-            const message: ChatMessage = { id: uuidv4(), ...chunk, timestamp: Date.now() };
-            addMessage(sessionId, message);
-            io.to(sessionId).emit('chat:message', { sessionId, message });
-          },
-          () => io.to(sessionId).emit('session:ended', { sessionId }),
-          async (files) => {
-            io.to(sessionId).emit('files:update', { sessionId, files });
-            for (const f of files.slice(0, 5)) {
-              const diff = await getDiff(s.worktreePath, f);
-              if (diff) io.to(sessionId).emit('diff:update', { sessionId, file: f, diff });
-            }
-          }
-        );
-        if (restarted) {
-          io.to(userId).emit('session:updated', toSummary(restarted));
-        }
-      }
-
       if (s.outputBuffer) {
         socket.emit('terminal:data', { sessionId, data: s.outputBuffer });
+      }
+    });
+
+    // ── Manual session stop ──────────────────────────────────
+    socket.on('session:stop', ({ sessionId }: { sessionId: string }) => {
+      const s = getSession(sessionId);
+      if (!s || s.userId !== userId) return;
+      if (stopSession(sessionId)) {
+        io.to(sessionId).emit('session:stopped', { sessionId });
+        io.to(userId).emit('session:updated', toSummary(s));
+      }
+    });
+
+    // ── Manual session start / restart ───────────────────────
+    socket.on('session:start', ({ sessionId }: { sessionId: string }) => {
+      const s = getSession(sessionId);
+      if (!s || s.userId !== userId) return;
+      if (s.status !== 'stopped') return;
+
+      const restarted = restartSession(
+        sessionId,
+        (raw) => {
+          io.to(sessionId).emit('terminal:data', { sessionId, data: raw });
+          const auth = detectAuthPrompt(s.model, raw);
+          if (auth) {
+            const seen = emittedAuthUrls.get(sessionId) || new Set();
+            if (!seen.has(auth.url)) {
+              seen.add(auth.url);
+              emittedAuthUrls.set(sessionId, seen);
+              io.to(sessionId).emit('session:auth-required', { sessionId, ...auth });
+            }
+          }
+        },
+        (chunk) => {
+          const message: ChatMessage = { id: uuidv4(), ...chunk, timestamp: Date.now() };
+          addMessage(sessionId, message);
+          io.to(sessionId).emit('chat:message', { sessionId, message });
+        },
+        () => io.to(sessionId).emit('session:ended', { sessionId }),
+        async (files) => {
+          io.to(sessionId).emit('files:update', { sessionId, files });
+          for (const f of files.slice(0, 5)) {
+            const diff = await getDiff(s.worktreePath, f);
+            if (diff) io.to(sessionId).emit('diff:update', { sessionId, file: f, diff });
+          }
+        }
+      );
+      if (restarted) {
+        io.to(sessionId).emit('session:started', { sessionId });
+        io.to(userId).emit('session:updated', toSummary(restarted));
       }
     });
 
@@ -299,17 +324,8 @@ export function setupWebSocketHandler(io: Server): void {
     });
   });
 
-  // ── Idle session cleanup ───────────────────────────────────
+  // ── Periodic session persistence ───────────────────────────
   setInterval(() => {
-    const now = Date.now();
-    for (const summary of listSessions()) {
-      const session = getSession(summary.id);
-      if (!session) continue;
-      if (session.status === 'running' && now - session.lastActivityAt > IDLE_TIMEOUT_MS) {
-        console.log(`[cleanup] Stopping idle session ${session.id} (${session.repoFullName})`);
-        stopSession(session.id);
-        io.to(session.userId).emit('session:updated', toSummary(session));
-      }
-    }
-  }, CLEANUP_INTERVAL_MS);
+    persistSessions();
+  }, 30_000);
 }

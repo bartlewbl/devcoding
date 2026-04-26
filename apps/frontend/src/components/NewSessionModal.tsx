@@ -3,6 +3,7 @@ import { Socket } from 'socket.io-client';
 import { Plus } from 'lucide-react';
 import RepoSelector from './RepoSelector';
 import { SessionSummary, GithubRepo } from '../types';
+import api from '../lib/api';
 
 interface Props {
   socket: Socket | null;
@@ -13,9 +14,10 @@ interface Props {
 export default function NewSessionModal({ socket, onClose, onCreated }: Props) {
   const [selectedRepo, setSelectedRepo] = useState<GithubRepo | null>(null);
   const [model, setModel] = useState<'claude' | 'kimi' | 'codex'>('claude');
-  const [modelName, setModelName] = useState<string>('claude-sonnet-4-6');
+  const [modelName, setModelName] = useState<string | undefined>('claude-sonnet-4-6');
   const [effort, setEffort] = useState<'low' | 'medium' | 'high'>('medium');
   const [creating, setCreating] = useState(false);
+  const [kimiModelLabel, setKimiModelLabel] = useState<string>('kimi-k2.6');
 
   useEffect(() => {
     if (!socket) return;
@@ -40,16 +42,31 @@ export default function NewSessionModal({ socket, onClose, onCreated }: Props) {
     };
   }, [socket, onCreated, onClose]);
 
+  useEffect(() => {
+    if (model !== 'kimi') return;
+    api.get('/kimi/model')
+      .then((res) => {
+        const displayName = res.data.displayName || res.data.model || 'kimi-k2.6';
+        setKimiModelLabel(displayName);
+      })
+      .catch(() => {
+        setKimiModelLabel('kimi-k2.6');
+      });
+  }, [model]);
+
   const createSession = () => {
     if (!selectedRepo || !socket) return;
     setCreating(true);
-    socket.emit('session:create', {
+    const payload: any = {
       repoUrl: selectedRepo.clone_url,
       repoFullName: selectedRepo.full_name,
       model,
-      modelName,
       effort,
-    });
+    };
+    if (modelName !== undefined) {
+      payload.modelName = modelName;
+    }
+    socket.emit('session:create', payload);
   };
 
   return (
@@ -73,7 +90,7 @@ export default function NewSessionModal({ socket, onClose, onCreated }: Props) {
                     setModel(m);
                     setModelName(
                       m === 'claude' ? 'claude-sonnet-4-6' :
-                      m === 'kimi' ? 'kimi-k2' :
+                      m === 'kimi' ? undefined :
                       'gpt-5.4'
                     );
                   }}
@@ -85,7 +102,14 @@ export default function NewSessionModal({ socket, onClose, onCreated }: Props) {
             </div>
           </div>
 
-          {model !== 'kimi' && (
+          {model === 'kimi' ? (
+            <div>
+              <label className="block text-xs text-zinc-400 mb-2">Model</label>
+              <div className="w-full bg-zinc-800/50 text-zinc-400 text-sm rounded-lg px-3 py-2 border border-zinc-700">
+                {kimiModelLabel}
+              </div>
+            </div>
+          ) : (
             <div>
               <label className="block text-xs text-zinc-400 mb-2">Model</label>
               <select

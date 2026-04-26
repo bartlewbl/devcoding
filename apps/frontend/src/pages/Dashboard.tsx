@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Github, LogOut, Zap, Clock, CheckCircle, XCircle, FolderGit, BarChart3 } from 'lucide-react';
+import { Plus, Github, LogOut, Zap, Clock, CheckCircle, XCircle, FolderGit, BarChart3, Pencil } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useSocket } from '../hooks/useSocket';
 import api from '../lib/api';
@@ -25,6 +25,8 @@ export default function Dashboard() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [githubConnected, setGithubConnected] = useState(false);
   const [showNew, setShowNew] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
 
   useEffect(() => {
     api.get('/github/status').then((r) => setGithubConnected(r.data.connected));
@@ -39,6 +41,7 @@ export default function Dashboard() {
     });
     socket.on('session:updated', (s: SessionSummary) => {
       setSessions((prev) => prev.map((x) => (x.id === s.id ? s : x)));
+      if (editingId === s.id) setEditingId(null);
     });
     return () => {
       socket.off('sessions:list');
@@ -126,19 +129,57 @@ export default function Dashboard() {
                     {repoSessions
                       .sort((a, b) => b.createdAt - a.createdAt)
                       .map((s) => (
-                        <button
+                        <div
                           key={s.id}
                           onClick={() => navigate(`/session/${s.id}`)}
-                          className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 text-left hover:border-zinc-700 transition-colors"
+                          className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 text-left hover:border-zinc-700 transition-colors cursor-pointer"
                         >
                           <div className="flex items-center gap-2 mb-2">
                             {STATUS_ICON[s.status]}
                             <span className="text-xs text-zinc-400 capitalize">{s.status}</span>
                             <span className="ml-auto text-xs text-zinc-600">{s.modelName || s.model}</span>
                           </div>
-                          <div className="font-mono text-xs text-zinc-300 truncate">{s.branch}</div>
+                          {editingId === s.id ? (
+                            <form
+                              onSubmit={(e) => {
+                                e.preventDefault();
+                                socket?.emit('session:rename', { sessionId: s.id, name: editName });
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              className="flex items-center gap-1"
+                            >
+                              <input
+                                autoFocus
+                                value={editName}
+                                onChange={(e) => setEditName(e.target.value)}
+                                onBlur={() => setEditingId(null)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Escape') setEditingId(null);
+                                }}
+                                className="flex-1 bg-zinc-950 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-100 outline-none focus:border-zinc-500"
+                                placeholder={s.branch}
+                              />
+                            </form>
+                          ) : (
+                            <div className="flex items-center gap-1 group">
+                              <div className="font-mono text-xs text-zinc-300 truncate flex-1">
+                                {s.name || s.branch}
+                              </div>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingId(s.id);
+                                  setEditName(s.name || '');
+                                }}
+                                className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-zinc-300 transition-opacity shrink-0"
+                                title="Rename"
+                              >
+                                <Pencil size={10} />
+                              </button>
+                            </div>
+                          )}
                           <div className="text-xs text-zinc-500 mt-1">{s.repoFullName}</div>
-                        </button>
+                        </div>
                       ))}
                   </div>
                 </div>

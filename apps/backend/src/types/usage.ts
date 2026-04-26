@@ -49,3 +49,12 @@ export interface UsageFilter {
   startTime?: number;
   endTime?: number;
 }
+
+export interface DailyUsage {
+  day: string; // YYYY-MM-DD
+  records: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  costUsd: number;
+}

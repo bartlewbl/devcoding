@@ -6,10 +6,15 @@ import { cloneOrFetch, createWorktree, removeWorktree, pushBranch, getChangedFil
 import { OutputParser, ParsedChunk } from './parser';
 import { Session, SessionSummary, ChatMessage } from '../types';
 import { recordUsage } from './usage';
-import { loadSessions } from './persistence';
+import { loadSessions, saveSessions } from './persistence';
+import { getKimiDefaultModel } from './kimiConfig';
 
 const OUTPUT_BUFFER_MAX = 50_000;
 const sessions = new Map<string, Session>();
+
+function persist(): void {
+  saveSessions(sessions);
+}
 
 export function initSessions(): void {
   const persisted = loadSessions();
@@ -30,6 +35,7 @@ export function toSummary(s: Session): SessionSummary {
     repoFullName: s.repoFullName,
     createdAt: s.createdAt,
     lastActivityAt: s.lastActivityAt,
+    name: s.name,
   };
 }
 
@@ -59,6 +65,14 @@ export async function createSession(
   const id = uuidv4();
   const branch = `ai/${model}-${Date.now()}`;
 
+  let resolvedModelName = modelName;
+  if (model === 'kimi') {
+    const kimiModel = getKimiDefaultModel();
+    if (kimiModel) {
+      resolvedModelName = kimiModel.displayName;
+    }
+  }
+
   const session: Session = {
     id,
     userId,
@@ -68,7 +82,7 @@ export async function createSession(
     worktreePath: '',
     branch,
     model,
-    modelName,
+    modelName: resolvedModelName,
     effort,
     status: 'creating',
     createdAt: Date.now(),
@@ -85,6 +99,7 @@ export async function createSession(
   const worktreePath = await createWorktree(repoPath, id, branch, token, repoUrl, repoFullName);
   session.worktreePath = worktreePath;
   session.status = 'ready';
+  persist();
 
   return session;
 }
@@ -107,6 +122,7 @@ export function addMessage(id: string, message: ChatMessage): boolean {
   if (s.messages.length > 500) {
     s.messages = s.messages.slice(-500);
   }
+  persist();
   return true;
 }
 
@@ -115,6 +131,10 @@ export function touchSession(id: string): boolean {
   if (!s) return false;
   s.lastActivityAt = Date.now();
   return true;
+}
+
+export function persistSessions(): void {
+  persist();
 }
 
 export function stopSession(id: string): boolean {
@@ -127,6 +147,7 @@ export function stopSession(id: string): boolean {
   s.pty = undefined;
   s.watcher = undefined;
   s.parser = undefined;
+  persist();
   return true;
 }
 
@@ -145,6 +166,7 @@ export function restartSession(
   s.status = 'ready';
   spawnCLI(s, onData, onParsed, onExit);
   watchFiles(s, onFiles);
+  persist();
   return s;
 }
 
@@ -255,6 +277,7 @@ export async function endSession(id: string): Promise<void> {
   if (s.repoPath && s.worktreePath) {
     await removeWorktree(s.repoPath, s.worktreePath, s.id).catch(() => null);
   }
+  persist();
 }
 
 export function updateSessionConfig(
@@ -266,6 +289,15 @@ export function updateSessionConfig(
   if (updates.model !== undefined) s.model = updates.model;
   if (updates.modelName !== undefined) s.modelName = updates.modelName;
   if (updates.effort !== undefined) s.effort = updates.effort;
+  persist();
+  return toSummary(s);
+}
+
+export function renameSession(id: string, name: string): SessionSummary | undefined {
+  const s = sessions.get(id);
+  if (!s) return undefined;
+  s.name = name.trim() || undefined;
+  persist();
   return toSummary(s);
 }
 
