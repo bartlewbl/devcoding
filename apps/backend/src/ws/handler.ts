@@ -23,13 +23,25 @@ import {
 import { getDiff } from '../services/git';
 import { githubTokens } from '../routes/github';
 import { JwtPayload } from '../middleware/auth';
-import { ChatMessage } from '../types';
+import { ChatMessage, Session } from '../types';
 import { detectAuthPrompt } from '../services/auth-detector';
+import { generateSessionName } from '../services/naming';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
 
 // Track auth URLs already emitted per session to avoid spam
 const emittedAuthUrls = new Map<string, Set<string>>();
+
+
+async function maybeGenerateName(session: Session, io: Server): Promise<void> {
+  if (session.name) return;
+  const name = await generateSessionName(session);
+  if (name) {
+    session.name = name;
+    persistSessions();
+    io.to(session.userId).emit('session:updated', toSummary(session));
+  }
+}
 
 export function setupWebSocketHandler(io: Server): void {
   io.use((socket, next) => {
@@ -88,6 +100,7 @@ export function setupWebSocketHandler(io: Server): void {
             const message: ChatMessage = { id: uuidv4(), ...chunk, timestamp: Date.now() };
             addMessage(session.id, message);
             io.to(session.id).emit('chat:message', { sessionId: session.id, message });
+            maybeGenerateName(session, io);
           },
           () => io.to(session.id).emit('session:ended', { sessionId: session.id })
         );
@@ -141,6 +154,7 @@ export function setupWebSocketHandler(io: Server): void {
       addMessage(sessionId, msg);
       io.to(sessionId).emit('chat:message', { sessionId, message: msg });
       s.pty?.write(message + '\r');
+      maybeGenerateName(s, io);
     });
 
     // ── Update session config (provider / model / effort) ─────
@@ -224,6 +238,7 @@ export function setupWebSocketHandler(io: Server): void {
           const message: ChatMessage = { id: uuidv4(), ...chunk, timestamp: Date.now() };
           addMessage(sessionId, message);
           io.to(sessionId).emit('chat:message', { sessionId, message });
+          maybeGenerateName(s, io);
         },
         () => io.to(sessionId).emit('session:ended', { sessionId }),
         async (files) => {
