@@ -20,6 +20,7 @@ import {
   mergeToMainWithConflictResolution,
   persistSessions,
   renameSession,
+  destroySession,
 } from '../services/session';
 import { getDiff } from '../services/git';
 import { githubTokens } from '../routes/github';
@@ -358,6 +359,14 @@ export function setupWebSocketHandler(io: Server): void {
       if (!s || s.userId !== userId) return;
       await endSession(sessionId);
       io.to(sessionId).emit('session:ended', { sessionId });
+    });
+
+    // ── Delete session ───────────────────────────────────────
+    socket.on('session:delete', async ({ sessionId }: { sessionId: string }) => {
+      const s = getSession(sessionId);
+      if (!s || s.userId !== userId) return;
+      await destroySession(sessionId);
+      io.to(userId).emit('session:deleted', { sessionId });
     });
   });
 

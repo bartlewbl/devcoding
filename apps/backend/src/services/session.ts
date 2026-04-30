@@ -11,7 +11,7 @@ import {
 import { OutputParser, ParsedChunk } from './parser';
 import { Session, SessionSummary, ChatMessage } from '../types';
 import { recordUsage } from './usage';
-import { loadSessions, saveSessions } from './persistence';
+import { loadSessions, saveSessions, deleteSession as deletePersistedSession } from './persistence';
 import { getKimiDefaultModel } from './kimiConfig';
 import { generateCommitMessageWithKimi } from './topic-generator';
 
@@ -287,6 +287,12 @@ export async function endSession(id: string): Promise<void> {
     await removeWorktree(s.repoPath, s.worktreePath, s.id).catch(() => null);
   }
   persist();
+}
+
+export async function destroySession(id: string): Promise<void> {
+  await endSession(id);
+  deletePersistedSession(id);
+  sessions.delete(id);
 }
 
 export function updateSessionConfig(

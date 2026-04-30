@@ -9,6 +9,8 @@ import FileTree from '../components/FileTree';
 import DiffViewer from '../components/DiffViewer';
 import NewSessionModal from '../components/NewSessionModal';
 import AuthPromptModal from '../components/AuthPromptModal';
+import SessionContextMenu from '../components/SessionContextMenu';
+import { useLongPress } from '../hooks/useLongPress';
 import { SessionSummary } from '../types';
 import api from '../lib/api';
 
@@ -21,6 +23,50 @@ const STATUS_ICON: Record<string, React.ReactNode> = {
   stopped: <Clock size={12} className="text-orange-400 shrink-0" />,
   ended: <XCircle size={12} className="text-zinc-600 shrink-0" />,
 };
+
+function SidebarSessionItem({
+  s,
+  isActive,
+  onNavigate,
+  onMenuOpen,
+}: {
+  s: SessionSummary;
+  isActive: boolean;
+  onNavigate: () => void;
+  onMenuOpen: (s: SessionSummary, x: number, y: number) => void;
+}) {
+  const { bind: longPressBind } = useLongPress({
+    onLongPress: (e) => {
+      const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+      const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+      onMenuOpen(s, clientX, clientY);
+    },
+  });
+
+  return (
+    <button
+      key={s.id}
+      {...longPressBind()}
+      onClick={onNavigate}
+      className={`w-full text-left rounded-lg px-3 py-2 transition-colors select-none ${
+        isActive
+          ? 'bg-zinc-800 border border-zinc-700'
+          : 'hover:bg-zinc-900 border border-transparent'
+      }`}
+    >
+      <div className="flex items-center gap-2 mb-1">
+        {STATUS_ICON[s.status]}
+        <span className={`text-xs capitalize ${isActive ? 'text-zinc-200' : 'text-zinc-400'}`}>
+          {s.status}
+        </span>
+        <span className="ml-auto text-[10px] text-zinc-600">{s.modelName || s.model}</span>
+      </div>
+      <div className={`font-mono text-xs truncate ${isActive ? 'text-zinc-100' : 'text-zinc-300'}`}>
+        {s.name || s.branch}
+      </div>
+    </button>
+  );
+}
 
 export default function Session() {
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -47,6 +93,8 @@ export default function Session() {
   const [authPrompt, setAuthPrompt] = useState<{ provider: 'claude' | 'kimi' | 'codex'; url: string; code?: string } | null>(null);
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState('');
+  const [menuSession, setMenuSession] = useState<SessionSummary | null>(null);
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | undefined>(undefined);
   const menuRef = useRef<HTMLDivElement>(null);
   const sessionMenuRef = useRef<HTMLDivElement>(null);
 
@@ -131,6 +179,11 @@ export default function Session() {
       setAllSessions((prev) => prev.map((s) => (s.id === summary.id ? summary : s)));
     });
 
+    socket.on('session:deleted', ({ sessionId: sid }: { sessionId: string }) => {
+      setAllSessions((prev) => prev.filter((s) => s.id !== sid));
+      if (sid === sessionId) navigate('/dashboard');
+    });
+
     socket.on('session:conflicts-detected', ({ sessionId: sid, files }: { sessionId: string; files: string[] }) => {
       if (sid === sessionId) setConflictFiles(files);
     });
@@ -155,6 +208,10 @@ export default function Session() {
       socket.off('session:ended');
       socket.off('session:stopped');
       socket.off('session:started');
+      socket.off('session:updated');
+      socket.off('session:deleted');
+      socket.off('session:conflicts-detected');
+      socket.off('session:error');
       socket.off('session:auth-required');
     };
   }, [socket, sessionId, selectedFile]);
@@ -210,6 +267,23 @@ export default function Session() {
   const startSession = () => {
     if (!socket || !sessionId) return;
     socket.emit('session:start', { sessionId });
+  };
+
+  const handleDelete = (sid: string) => {
+    socket?.emit('session:delete', { sessionId: sid });
+  };
+
+  const handleEnd = (sid: string) => {
+    socket?.emit('session:end', { sessionId: sid });
+    if (sid === sessionId) navigate('/dashboard');
+  };
+
+  const handleStart = (sid: string) => {
+    socket?.emit('session:start', { sessionId: sid });
+  };
+
+  const handleStop = (sid: string) => {
+    socket?.emit('session:stop', { sessionId: sid });
   };
 
   if (!socket || !session || !sessionId) {
@@ -457,29 +531,16 @@ export default function Session() {
                           .map((s) => {
                             const isActive = s.id === sessionId;
                             return (
-                              <button
+                              <SidebarSessionItem
                                 key={s.id}
-                                onClick={() => {
+                                s={s}
+                                isActive={isActive}
+                                onNavigate={() => {
                                   navigate(`/session/${s.id}`);
                                   setShowMobileLeft(false);
                                 }}
-                                className={`w-full text-left rounded-lg px-3 py-2 transition-colors ${
-                                  isActive
-                                    ? 'bg-zinc-800 border border-zinc-700'
-                                    : 'hover:bg-zinc-900 border border-transparent'
-                                }`}
-                              >
-                                <div className="flex items-center gap-2 mb-1">
-                                  {STATUS_ICON[s.status]}
-                                  <span className={`text-xs capitalize ${isActive ? 'text-zinc-200' : 'text-zinc-400'}`}>
-                                    {s.status}
-                                  </span>
-                                  <span className="ml-auto text-[10px] text-zinc-600">{s.modelName || s.model}</span>
-                                </div>
-                                <div className={`font-mono text-xs truncate ${isActive ? 'text-zinc-100' : 'text-zinc-300'}`}>
-                                  {s.name || s.branch}
-                                </div>
-                              </button>
+                                onMenuOpen={(s, x, y) => { setMenuSession(s); setMenuPos({ x, y }); }}
+                              />
                             );
                           })}
                       </div>
@@ -580,6 +641,31 @@ export default function Session() {
           url={authPrompt.url}
           code={authPrompt.code}
           onClose={() => setAuthPrompt(null)}
+        />
+      )}
+
+      {menuSession && (
+        <SessionContextMenu
+          session={menuSession}
+          x={menuPos?.x}
+          y={menuPos?.y}
+          onClose={() => { setMenuSession(null); setMenuPos(undefined); }}
+          onOpen={() => {
+            navigate(`/session/${menuSession.id}`);
+            setShowMobileLeft(false);
+          }}
+          onRename={() => {
+            if (menuSession.id === sessionId) {
+              setRenameValue(menuSession.name || '');
+              setIsRenaming(true);
+            } else {
+              socket?.emit('session:rename', { sessionId: menuSession.id, name: menuSession.name || menuSession.branch });
+            }
+          }}
+          onStart={() => handleStart(menuSession.id)}
+          onStop={() => handleStop(menuSession.id)}
+          onEnd={() => handleEnd(menuSession.id)}
+          onDelete={() => handleDelete(menuSession.id)}
         />
       )}
     </div>

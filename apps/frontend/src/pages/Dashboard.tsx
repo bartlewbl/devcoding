@@ -6,6 +6,8 @@ import { useAuth } from '../hooks/useAuth';
 import { useSocket } from '../hooks/useSocket';
 import api from '../lib/api';
 import NewSessionModal from '../components/NewSessionModal';
+import SessionContextMenu from '../components/SessionContextMenu';
+import { useLongPress } from '../hooks/useLongPress';
 import { SessionSummary } from '../types';
 
 const BACKEND = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
@@ -18,6 +20,89 @@ const STATUS_ICON: Record<string, React.ReactNode> = {
   ended: <XCircle size={12} className="text-zinc-600" />,
 };
 
+function SessionCard({
+  s,
+  editingId,
+  editName,
+  setEditName,
+  setEditingId,
+  socket,
+  navigate,
+  onMenuOpen,
+}: {
+  s: SessionSummary;
+  editingId: string | null;
+  editName: string;
+  setEditName: (v: string) => void;
+  setEditingId: (v: string | null) => void;
+  socket: ReturnType<typeof useSocket>;
+  navigate: ReturnType<typeof useNavigate>;
+  onMenuOpen: (s: SessionSummary, x: number, y: number) => void;
+}) {
+  const { bind: longPressBind } = useLongPress({
+    onLongPress: (e) => {
+      const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+      const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+      onMenuOpen(s, clientX, clientY);
+    },
+  });
+
+  return (
+    <div
+      key={s.id}
+      {...longPressBind()}
+      onClick={() => navigate(`/session/${s.id}`)}
+      className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 text-left hover:border-zinc-700 active:bg-zinc-800 transition-colors cursor-pointer select-none"
+    >
+      <div className="flex items-center gap-2 mb-2">
+        {STATUS_ICON[s.status]}
+        <span className="text-xs text-zinc-400 capitalize">{s.status}</span>
+        <span className="ml-auto text-xs text-zinc-600">{s.modelName || s.model}</span>
+      </div>
+      {editingId === s.id ? (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            socket?.emit('session:rename', { sessionId: s.id, name: editName });
+          }}
+          onClick={(e) => e.stopPropagation()}
+          className="flex items-center gap-1"
+        >
+          <input
+            autoFocus
+            value={editName}
+            onChange={(e) => setEditName(e.target.value)}
+            onBlur={() => setEditingId(null)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') setEditingId(null);
+            }}
+            className="flex-1 bg-zinc-950 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-100 outline-none focus:border-zinc-500"
+            placeholder={s.branch}
+          />
+        </form>
+      ) : (
+        <div className="flex items-center gap-1 group">
+          <div className="font-mono text-xs text-zinc-300 truncate flex-1">
+            {s.name || s.branch}
+          </div>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setEditingId(s.id);
+              setEditName(s.name || '');
+            }}
+            className="opacity-0 group-hover:opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-zinc-500 hover:text-zinc-300 transition-opacity shrink-0 p-1 -mr-1"
+            title="Rename"
+          >
+            <Pencil size={12} />
+          </button>
+        </div>
+      )}
+      <div className="text-xs text-zinc-500 mt-1">{s.repoFullName}</div>
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const { logout, token } = useAuth();
   const socket = useSocket();
@@ -28,6 +113,8 @@ export default function Dashboard() {
   const [showNew, setShowNew] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
+  const [menuSession, setMenuSession] = useState<SessionSummary | null>(null);
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | undefined>(undefined);
 
   useEffect(() => {
     api.get('/github/status').then((r) => setGithubConnected(r.data.connected));
@@ -44,15 +131,35 @@ export default function Dashboard() {
       setSessions((prev) => prev.map((x) => (x.id === s.id ? s : x)));
       if (editingId === s.id) setEditingId(null);
     });
+    socket.on('session:deleted', ({ sessionId }: { sessionId: string }) => {
+      setSessions((prev) => prev.filter((x) => x.id !== sessionId));
+    });
     return () => {
       socket.off('sessions:list');
       socket.off('session:created');
       socket.off('session:updated');
+      socket.off('session:deleted');
     };
   }, [socket]);
 
   const connectGitHub = () => {
     window.location.href = `${BACKEND}/api/github/authorize?token=${token}`;
+  };
+
+  const handleDelete = (sessionId: string) => {
+    socket?.emit('session:delete', { sessionId });
+  };
+
+  const handleEnd = (sessionId: string) => {
+    socket?.emit('session:end', { sessionId });
+  };
+
+  const handleStart = (sessionId: string) => {
+    socket?.emit('session:start', { sessionId });
+  };
+
+  const handleStop = (sessionId: string) => {
+    socket?.emit('session:stop', { sessionId });
   };
 
   return (
@@ -130,57 +237,17 @@ export default function Dashboard() {
                     {repoSessions
                       .sort((a, b) => b.createdAt - a.createdAt)
                       .map((s) => (
-                        <div
+                        <SessionCard
                           key={s.id}
-                          onClick={() => navigate(`/session/${s.id}`)}
-                          className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 text-left hover:border-zinc-700 active:bg-zinc-800 transition-colors cursor-pointer"
-                        >
-                          <div className="flex items-center gap-2 mb-2">
-                            {STATUS_ICON[s.status]}
-                            <span className="text-xs text-zinc-400 capitalize">{s.status}</span>
-                            <span className="ml-auto text-xs text-zinc-600">{s.modelName || s.model}</span>
-                          </div>
-                          {editingId === s.id ? (
-                            <form
-                              onSubmit={(e) => {
-                                e.preventDefault();
-                                socket?.emit('session:rename', { sessionId: s.id, name: editName });
-                              }}
-                              onClick={(e) => e.stopPropagation()}
-                              className="flex items-center gap-1"
-                            >
-                              <input
-                                autoFocus
-                                value={editName}
-                                onChange={(e) => setEditName(e.target.value)}
-                                onBlur={() => setEditingId(null)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Escape') setEditingId(null);
-                                }}
-                                className="flex-1 bg-zinc-950 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-100 outline-none focus:border-zinc-500"
-                                placeholder={s.branch}
-                              />
-                            </form>
-                          ) : (
-                            <div className="flex items-center gap-1 group">
-                              <div className="font-mono text-xs text-zinc-300 truncate flex-1">
-                                {s.name || s.branch}
-                              </div>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setEditingId(s.id);
-                                  setEditName(s.name || '');
-                                }}
-                                className="opacity-0 group-hover:opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-zinc-500 hover:text-zinc-300 transition-opacity shrink-0 p-1 -mr-1"
-                                title="Rename"
-                              >
-                                <Pencil size={12} />
-                              </button>
-                            </div>
-                          )}
-                          <div className="text-xs text-zinc-500 mt-1">{s.repoFullName}</div>
-                        </div>
+                          s={s}
+                          editingId={editingId}
+                          editName={editName}
+                          setEditName={setEditName}
+                          setEditingId={setEditingId}
+                          socket={socket}
+                          navigate={navigate}
+                          onMenuOpen={(s, x, y) => { setMenuSession(s); setMenuPos({ x, y }); }}
+                        />
                       ))}
                   </div>
                 </div>
@@ -194,6 +261,24 @@ export default function Dashboard() {
           socket={socket}
           onClose={() => setShowNew(false)}
           onCreated={(s) => navigate(`/session/${s.id}`)}
+        />
+      )}
+
+      {menuSession && (
+        <SessionContextMenu
+          session={menuSession}
+          x={menuPos?.x}
+          y={menuPos?.y}
+          onClose={() => { setMenuSession(null); setMenuPos(undefined); }}
+          onOpen={() => navigate(`/session/${menuSession.id}`)}
+          onRename={() => {
+            setEditingId(menuSession.id);
+            setEditName(menuSession.name || '');
+          }}
+          onStart={() => handleStart(menuSession.id)}
+          onStop={() => handleStop(menuSession.id)}
+          onEnd={() => handleEnd(menuSession.id)}
+          onDelete={() => handleDelete(menuSession.id)}
         />
       )}
     </div>
