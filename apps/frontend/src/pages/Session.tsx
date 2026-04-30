@@ -125,7 +125,7 @@ export default function Session() {
   }
 
   return (
-    <div className="h-screen bg-zinc-950 text-zinc-100 flex flex-col">
+    <div className="h-screen bg-zinc-950 text-zinc-100 flex flex-col max-md:fixed max-md:inset-0">
       {spawnError && (
         <div className="bg-red-950 border-b border-red-800 text-red-300 text-xs px-4 py-2">
           CLI error: {spawnError} — check backend logs and make sure <code className="font-mono">claude</code> / <code className="font-mono">kimi</code> / <code className="font-mono">codex</code> is installed and accessible.
