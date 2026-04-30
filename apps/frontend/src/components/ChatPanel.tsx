@@ -76,7 +76,7 @@ export default function ChatPanel({ sessionId, socket, model }: Props) {
 
   return (
     <div className="flex flex-col h-full bg-zinc-950">
-      <div className="flex-1 overflow-y-auto px-4 py-5 min-h-0">
+      <div className="flex-1 overflow-y-auto px-4 py-5 min-h-0 overscroll-contain">
         {messages.length === 0 && (
           <p className="text-zinc-700 text-sm">Session started. Type a message to begin.</p>
         )}
@@ -100,7 +100,7 @@ export default function ChatPanel({ sessionId, socket, model }: Props) {
             onKeyDown={onKey}
             placeholder="Type a message… (Enter to send, Shift+Enter for newline)"
             rows={2}
-            className="flex-1 bg-zinc-900 text-zinc-100 rounded-xl px-4 py-3 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-zinc-700 placeholder-zinc-600"
+            className="flex-1 bg-zinc-900 text-zinc-100 rounded-xl px-4 py-3 text-base md:text-sm resize-none focus:outline-none focus:ring-1 focus:ring-zinc-700 placeholder-zinc-600"
           />
           <button
             onClick={send}

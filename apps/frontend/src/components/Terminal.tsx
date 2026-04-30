@@ -54,6 +54,7 @@ export default function Terminal({ sessionId, socket, tab }: Props) {
     term.onResize(({ cols, rows }) => socket.emit('terminal:resize', { sessionId, cols, rows }));
 
     const ro = new ResizeObserver(() => {
+      if (tab !== 'terminal') return;
       try { fit.fit(); } catch { /* ignore if disposed */ }
     });
     ro.observe(containerRef.current);

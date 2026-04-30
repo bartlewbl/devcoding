@@ -118,14 +118,14 @@ export default function Session() {
 
   if (!socket || !session || !sessionId) {
     return (
-      <div className="min-h-screen bg-zinc-950 flex items-center justify-center text-zinc-500">
+      <div className="min-h-[100dvh] bg-zinc-950 flex items-center justify-center text-zinc-500">
         Loading…
       </div>
     );
   }
 
   return (
-    <div className="h-screen bg-zinc-950 text-zinc-100 flex flex-col">
+    <div className="h-[100dvh] bg-zinc-950 text-zinc-100 flex flex-col">
       {spawnError && (
         <div className="bg-red-950 border-b border-red-800 text-red-300 text-xs px-4 py-2">
           CLI error: {spawnError} — check backend logs and make sure <code className="font-mono">claude</code> / <code className="font-mono">kimi</code> / <code className="font-mono">codex</code> is installed and accessible.
@@ -133,19 +133,19 @@ export default function Session() {
       )}
       {/* Header */}
       <header className="border-b border-zinc-900 px-4 py-3 flex items-center gap-3 shrink-0">
-        <Link to="/dashboard" className="text-zinc-500 hover:text-zinc-300 transition-colors">
+        <Link to="/dashboard" className="text-zinc-500 hover:text-zinc-300 transition-colors shrink-0">
           <ArrowLeft size={16} />
         </Link>
-        <GitBranch size={14} className="text-zinc-500" />
-        <span className="font-mono text-sm text-zinc-300">{session.branch}</span>
-        <span className="text-zinc-700 text-xs">·</span>
-        <span className="text-xs text-zinc-500">{session.repoFullName}</span>
-        <span className="text-xs text-zinc-700 capitalize ml-1">{session.model}</span>
+        <GitBranch size={14} className="text-zinc-500 shrink-0" />
+        <span className="font-mono text-sm text-zinc-300 truncate">{session.branch}</span>
+        <span className="text-zinc-700 text-xs shrink-0 hidden sm:inline">·</span>
+        <span className="text-xs text-zinc-500 truncate hidden sm:inline">{session.repoFullName}</span>
+        <span className="text-xs text-zinc-700 capitalize ml-1 shrink-0 hidden sm:inline">{session.model}</span>
         {session.modelName && (
-          <span className="text-xs text-zinc-600 ml-1">({session.modelName})</span>
+          <span className="text-xs text-zinc-600 ml-1 shrink-0 hidden sm:inline">({session.modelName})</span>
         )}
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-2 shrink-0">
           {pushUrl ? (
             <a href={pushUrl} target="_blank" rel="noreferrer"
               className="text-xs text-green-400 hover:text-green-300 underline">
@@ -173,7 +173,7 @@ export default function Session() {
       {/* Body */}
       <div className="flex flex-1 min-h-0">
         {/* Left sidebar: sessions */}
-        <div className="w-64 border-r border-zinc-900 flex flex-col shrink-0 bg-zinc-950">
+        <div className="hidden md:flex w-64 border-r border-zinc-900 flex-col shrink-0 bg-zinc-950">
           <div className="px-4 py-3 border-b border-zinc-900 flex items-center justify-between">
             <span className="text-xs text-zinc-500 uppercase tracking-wider">Sessions</span>
             <button
@@ -266,7 +266,7 @@ export default function Session() {
         </div>
 
         {/* Right sidebar: files + diff */}
-        <div className="w-72 border-l border-zinc-900 flex flex-col shrink-0">
+        <div className="hidden lg:flex w-72 border-l border-zinc-900 flex-col shrink-0">
           <div className="px-4 py-3 border-b border-zinc-900">
             <span className="text-xs text-zinc-500 uppercase tracking-wider">Changed Files</span>
           </div>
