@@ -32,7 +32,8 @@ export function getDb(): Database.Database {
       lastActivityAt INTEGER NOT NULL,
       stoppedAt INTEGER,
       outputBuffer TEXT NOT NULL DEFAULT '',
-      messages TEXT NOT NULL DEFAULT '[]'
+      messages TEXT NOT NULL DEFAULT '[]',
+      name TEXT
     );
 
     CREATE TABLE IF NOT EXISTS usage (
@@ -54,7 +55,19 @@ export function getDb(): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_usage_provider ON usage(provider);
     CREATE INDEX IF NOT EXISTS idx_usage_timestamp ON usage(timestamp);
     CREATE INDEX IF NOT EXISTS idx_usage_model ON usage(modelName);
+
+    CREATE TABLE IF NOT EXISTS github_tokens (
+      userId TEXT PRIMARY KEY,
+      token TEXT NOT NULL
+    );
   `);
+
+  // Migrate existing databases that don't have the name column
+  try {
+    db.prepare(`ALTER TABLE sessions ADD COLUMN name TEXT`).run();
+  } catch {
+    // Column already exists — ignore
+  }
 
   return db;
 }

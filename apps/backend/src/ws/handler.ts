@@ -17,6 +17,7 @@ import {
   stopSession,
   addMessage,
   mergeToMainSession,
+  mergeToMainWithConflictResolution,
   persistSessions,
   renameSession,
 } from '../services/session';
@@ -25,6 +26,7 @@ import { githubTokens } from '../routes/github';
 import { JwtPayload } from '../middleware/auth';
 import { ChatMessage } from '../types';
 import { detectAuthPrompt } from '../services/auth-detector';
+import { generateTopicWithKimi, isTopicGenerationInFlight } from '../services/topic-generator';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
 
@@ -141,6 +143,23 @@ export function setupWebSocketHandler(io: Server): void {
       addMessage(sessionId, msg);
       io.to(sessionId).emit('chat:message', { sessionId, message: msg });
       s.pty?.write(message + '\r');
+
+      // Async topic generation — uses the first user message as the prompt.
+      // This also covers sessions that were restarted or failed the first attempt.
+      if (!s.name && !isTopicGenerationInFlight(sessionId)) {
+        const firstUserMsg = s.messages.find((m) => m.type === 'user');
+        if (firstUserMsg) {
+          generateTopicWithKimi(sessionId, firstUserMsg.content).then((topic) => {
+            if (topic && s.status !== 'ended' && !s.name) {
+              s.name = topic;
+              persistSessions();
+              io.to(userId).emit('session:updated', toSummary(s));
+            }
+          }).catch((err) => {
+            console.error(`[ws] topic generation failed for ${sessionId}:`, err);
+          });
+        }
+      }
     });
 
     // ── Update session config (provider / model / effort) ─────
@@ -297,6 +316,24 @@ export function setupWebSocketHandler(io: Server): void {
       touchSession(sessionId);
       try {
         await mergeToMainSession(sessionId);
+        socket.emit('session:merged-to-main', {
+          sessionId,
+          url: `https://github.com/${s.repoFullName}`,
+        });
+      } catch (err: any) {
+        socket.emit('session:error', { sessionId, error: err.message });
+      }
+    });
+
+    // ── Fix conflicts & push to main ─────────────────────────
+    socket.on('session:fix-conflicts', async ({ sessionId }: { sessionId: string }) => {
+      const s = getSession(sessionId);
+      if (!s || s.userId !== userId) return;
+      touchSession(sessionId);
+      try {
+        await mergeToMainWithConflictResolution(sessionId, (files) => {
+          socket.emit('session:conflicts-detected', { sessionId, files });
+        });
         socket.emit('session:merged-to-main', {
           sessionId,
           url: `https://github.com/${s.repoFullName}`,

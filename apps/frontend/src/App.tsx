@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { SocketProvider } from './hooks/useSocket';
+import { useGitHubAutoReconnect } from './hooks/useGitHubAutoReconnect';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Session from './pages/Session';
@@ -10,6 +11,8 @@ import GitHubCallback from './pages/GitHubCallback';
 
 function ProtectedApp() {
   const { isAuthenticated } = useAuth();
+  useGitHubAutoReconnect();
+
   if (!isAuthenticated) return <Navigate to="/login" replace />;
 
   return (

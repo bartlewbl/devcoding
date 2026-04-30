@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { GitBranch, Upload, Square, ArrowLeft, TerminalSquare, MessageSquare, Zap, Clock, CheckCircle, XCircle, ChevronDown, GitPullRequest, GitMerge, Menu, FileCode, Play, RotateCcw, Power, Pencil } from 'lucide-react';
+import { GitBranch, Upload, Square, ArrowLeft, TerminalSquare, MessageSquare, Zap, Clock, CheckCircle, XCircle, ChevronDown, GitPullRequest, GitMerge, Menu, FileCode, Play, RotateCcw, Power, Pencil, Loader2, Wrench } from 'lucide-react';
+import Spinner from '../components/Spinner';
 import { useSocket } from '../hooks/useSocket';
 import Terminal from '../components/Terminal';
 import ChatPanel from '../components/ChatPanel';
@@ -13,10 +14,10 @@ import api from '../lib/api';
 
 type Tab = 'chat' | 'terminal';
 
-const STATUS_ICON = {
-  creating: <Clock size={12} className="text-yellow-500 shrink-0" />,
+const STATUS_ICON: Record<string, React.ReactNode> = {
+  creating: <Spinner size={12} className="text-yellow-500 shrink-0" />,
   ready: <CheckCircle size={12} className="text-green-500 shrink-0" />,
-  running: <Zap size={12} className="text-blue-400 shrink-0" />,
+  running: <Spinner size={12} className="text-blue-400 shrink-0" />,
   stopped: <Clock size={12} className="text-orange-400 shrink-0" />,
   ended: <XCircle size={12} className="text-zinc-600 shrink-0" />,
 };
@@ -39,6 +40,7 @@ export default function Session() {
   const [showMenu, setShowMenu] = useState(false);
   const [showSessionMenu, setShowSessionMenu] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
+  const [conflictFiles, setConflictFiles] = useState<string[] | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [showMobileLeft, setShowMobileLeft] = useState(false);
   const [showMobileRight, setShowMobileRight] = useState(false);
@@ -109,7 +111,7 @@ export default function Session() {
     });
 
     socket.on('session:merged-to-main', ({ sessionId: sid }: { sessionId: string }) => {
-      if (sid === sessionId) { setMergedToMain(true); setActionInProgress(null); }
+      if (sid === sessionId) { setMergedToMain(true); setActionInProgress(null); setConflictFiles(null); }
     });
 
     socket.on('session:ended', ({ sessionId: sid }: { sessionId: string }) => {
@@ -129,8 +131,15 @@ export default function Session() {
       setAllSessions((prev) => prev.map((s) => (s.id === summary.id ? summary : s)));
     });
 
+    socket.on('session:conflicts-detected', ({ sessionId: sid, files }: { sessionId: string; files: string[] }) => {
+      if (sid === sessionId) setConflictFiles(files);
+    });
+
     socket.on('session:error', ({ sessionId: sid, error }: { sessionId?: string; error: string }) => {
-      if (!sid || sid === sessionId) setSessionError(error);
+      if (!sid || sid === sessionId) {
+        setSessionError(error);
+        setConflictFiles(null);
+      }
     });
 
     socket.on('session:auth-required', ({ sessionId: sid, provider, url, code }: { sessionId: string; provider: 'claude' | 'kimi' | 'codex'; url: string; code?: string }) => {
@@ -179,6 +188,14 @@ export default function Session() {
     setShowMenu(false);
   };
 
+  const fixConflictsAndPush = () => {
+    if (!socket || !sessionId) return;
+    setActionInProgress('fix-conflicts');
+    setConflictFiles(null);
+    socket.emit('session:fix-conflicts', { sessionId });
+    setShowMenu(false);
+  };
+
   const endSession = () => {
     if (!socket || !sessionId) return;
     socket.emit('session:end', { sessionId });
@@ -197,7 +214,8 @@ export default function Session() {
 
   if (!socket || !session || !sessionId) {
     return (
-      <div className="min-h-screen bg-zinc-950 flex items-center justify-center text-zinc-500">
+      <div className="min-h-screen bg-zinc-950 flex items-center justify-center text-zinc-500 gap-2">
+        <Spinner size={16} />
         Loading…
       </div>
     );
@@ -214,17 +232,17 @@ export default function Session() {
       <header className="border-b border-zinc-900 px-3 py-2 md:px-4 md:py-3 shrink-0">
         {/* Top row — always visible */}
         <div className="flex items-center gap-2 md:gap-3">
-          <Link to="/dashboard" className="flex items-center justify-center h-9 w-9 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors shrink-0">
-            <ArrowLeft size={18} />
+          <Link to="/dashboard" className="flex items-center justify-center h-10 w-10 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors shrink-0">
+            <ArrowLeft size={20} />
           </Link>
 
           {/* Mobile sidebar toggles */}
           <button
             onClick={() => setShowMobileLeft(!showMobileLeft)}
-            className={`md:hidden flex items-center justify-center gap-1.5 h-9 px-3 rounded-lg text-xs font-medium transition-colors shrink-0 ${showMobileLeft ? 'bg-zinc-700 text-zinc-100' : 'bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'}`}
+            className={`md:hidden flex items-center justify-center gap-1.5 h-10 px-3 rounded-lg text-xs font-medium transition-colors shrink-0 ${showMobileLeft ? 'bg-zinc-700 text-zinc-100' : 'bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'}`}
             title="Sessions"
           >
-            <Menu size={16} />
+            <Menu size={20} />
             <span>Sessions</span>
           </button>
 
@@ -258,10 +276,10 @@ export default function Session() {
             {/* Mobile files toggle */}
             <button
               onClick={() => setShowMobileRight(!showMobileRight)}
-              className={`md:hidden flex items-center justify-center gap-1.5 h-9 px-3 rounded-lg text-xs font-medium transition-colors shrink-0 ${showMobileRight ? 'bg-zinc-700 text-zinc-100' : 'bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'}`}
+              className={`md:hidden flex items-center justify-center gap-1.5 h-10 px-3 rounded-lg text-xs font-medium transition-colors shrink-0 ${showMobileRight ? 'bg-zinc-700 text-zinc-100' : 'bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'}`}
               title="Files"
             >
-              <FileCode size={16} />
+              <FileCode size={20} />
               <span>Files</span>
             </button>
 
@@ -269,13 +287,13 @@ export default function Session() {
               <button
                 onClick={() => setShowMenu(!showMenu)}
                 disabled={actionInProgress !== null || session.status === 'creating'}
-                className="flex items-center justify-center h-9 px-3 gap-1.5 text-xs bg-zinc-900 hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-40 shrink-0"
+                className="flex items-center justify-center h-10 px-3 gap-1.5 text-xs bg-zinc-900 hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-40 shrink-0"
               >
-                <Upload size={14} />
-                <span className="hidden sm:inline">
-                  {actionInProgress === 'push' ? 'Pushing…' : actionInProgress === 'pr' ? 'Creating PR…' : actionInProgress === 'merge' ? 'Merging…' : 'Git Actions'}
+                <Upload size={16} />
+                <span className="hidden sm:inline flex items-center gap-1.5">
+                  {actionInProgress === 'push' ? <><Spinner size={12} /> Pushing…</> : actionInProgress === 'pr' ? <><Spinner size={12} /> Creating PR…</> : actionInProgress === 'merge' ? <><Spinner size={12} /> Merging…</> : actionInProgress === 'fix-conflicts' ? <><Spinner size={12} /> Resolving…</> : 'Git Actions'}
                 </span>
-                <ChevronDown size={14} />
+                <ChevronDown size={16} />
               </button>
 
               {showMenu && (
@@ -294,9 +312,15 @@ export default function Session() {
                   </button>
                   <button
                     onClick={mergeToMain}
-                    className="w-full text-left px-4 py-2 text-xs text-zinc-100 hover:bg-zinc-700 flex items-center gap-2 last:rounded-b-lg"
+                    className="w-full text-left px-4 py-2 text-xs text-zinc-100 hover:bg-zinc-700 flex items-center gap-2"
                   >
                     <GitMerge size={12} /> Push to Main
+                  </button>
+                  <button
+                    onClick={fixConflictsAndPush}
+                    className="w-full text-left px-4 py-2 text-xs text-zinc-100 hover:bg-zinc-700 flex items-center gap-2 last:rounded-b-lg"
+                  >
+                    <Wrench size={12} /> Fix Conflicts & Push
                   </button>
                 </div>
               )}
@@ -305,12 +329,12 @@ export default function Session() {
             <div className="relative" ref={sessionMenuRef}>
               <button
                 onClick={() => setShowSessionMenu(!showSessionMenu)}
-                className="flex items-center justify-center h-9 px-3 gap-1.5 text-xs bg-zinc-900 hover:bg-zinc-800 rounded-lg transition-colors shrink-0"
+                className="flex items-center justify-center h-10 px-3 gap-1.5 text-xs bg-zinc-900 hover:bg-zinc-800 rounded-lg transition-colors shrink-0"
                 title="Session actions"
               >
-                <Power size={14} />
+                <Power size={16} />
                 <span className="hidden sm:inline">Session</span>
-                <ChevronDown size={14} />
+                <ChevronDown size={16} />
               </button>
 
               {showSessionMenu && (
@@ -362,6 +386,7 @@ export default function Session() {
           {pushUrl && <a href={pushUrl} target="_blank" rel="noreferrer" className="text-green-400 hover:text-green-300 underline">Branch pushed ↗</a>}
           {prUrl && <a href={prUrl} target="_blank" rel="noreferrer" className="text-green-400 hover:text-green-300 underline">PR created ↗</a>}
           {mergedToMain && <span className="text-green-400">Merged to main ✓</span>}
+          {conflictFiles && <span className="text-yellow-400">Resolving conflicts in {conflictFiles.length} file{conflictFiles.length !== 1 ? 's' : ''}…</span>}
         </div>
       </header>
 
@@ -393,12 +418,21 @@ export default function Session() {
         >
           <div className="px-4 py-3 border-b border-zinc-900 flex items-center justify-between">
             <span className="text-xs text-zinc-500 uppercase tracking-wider">Sessions</span>
-            <button
-              onClick={() => setShowNew(true)}
-              className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
-            >
-              + New
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowNew(true)}
+                className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+              >
+                + New
+              </button>
+              <button
+                onClick={() => setShowMobileLeft(false)}
+                className="md:hidden text-zinc-500 hover:text-zinc-300 transition-colors p-1"
+                title="Close"
+              >
+                ✕
+              </button>
+            </div>
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto py-2">
             {allSessions.length === 0 ? (
@@ -464,13 +498,13 @@ export default function Session() {
               onClick={() => setTab('chat')}
               className={`flex items-center justify-center gap-1.5 text-xs md:text-sm px-4 py-2.5 md:px-3 md:py-2 rounded-t-lg transition-colors min-h-[40px] min-w-[80px] ${tab === 'chat' ? 'text-zinc-100 border-b-2 border-zinc-400' : 'text-zinc-500 hover:text-zinc-300'}`}
             >
-              <MessageSquare size={14} /> <span className="hidden sm:inline">Chat</span>
+              <MessageSquare size={18} /> <span className="hidden sm:inline">Chat</span>
             </button>
             <button
               onClick={() => setTab('terminal')}
               className={`flex items-center justify-center gap-1.5 text-xs md:text-sm px-4 py-2.5 md:px-3 md:py-2 rounded-t-lg transition-colors min-h-[40px] min-w-[80px] ${tab === 'terminal' ? 'text-zinc-100 border-b-2 border-zinc-400' : 'text-zinc-500 hover:text-zinc-300'}`}
             >
-              <TerminalSquare size={14} /> <span className="hidden sm:inline">Terminal</span>
+              <TerminalSquare size={18} /> <span className="hidden sm:inline">Terminal</span>
             </button>
           </div>
 
@@ -497,7 +531,8 @@ export default function Session() {
             <span className="text-xs text-zinc-500 uppercase tracking-wider">Changed Files</span>
             <button
               onClick={() => setShowMobileRight(false)}
-              className="md:hidden text-zinc-500 hover:text-zinc-300 transition-colors"
+              className="md:hidden flex items-center justify-center w-8 h-8 rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900 transition-colors"
+              title="Close"
             >
               ✕
             </button>
@@ -516,7 +551,7 @@ export default function Session() {
               <span className="font-mono text-sm text-zinc-100 truncate">{selectedFile}</span>
               <button
                 onClick={() => setSelectedFile(null)}
-                className="text-zinc-500 hover:text-zinc-300 transition-colors shrink-0"
+                className="flex items-center justify-center w-9 h-9 rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors shrink-0"
               >
                 ✕
               </button>
@@ -532,6 +567,10 @@ export default function Session() {
         <NewSessionModal
           socket={socket}
           onClose={() => setShowNew(false)}
+          onCreated={(s) => {
+            setTab('chat');
+            navigate(`/session/${s.id}`);
+          }}
         />
       )}
 

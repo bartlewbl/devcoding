@@ -122,9 +122,9 @@ export default function ChatPanel({ sessionId, socket, model }: Props) {
           />
           <button
             onClick={send}
-            className="p-3 bg-zinc-800 text-zinc-300 rounded-xl hover:bg-zinc-700 transition-colors shrink-0"
+            className="h-11 w-11 flex items-center justify-center bg-zinc-800 text-zinc-300 rounded-xl hover:bg-zinc-700 transition-colors shrink-0"
           >
-            <Send size={16} />
+            <Send size={18} />
           </button>
         </div>
       </div>

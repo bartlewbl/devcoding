@@ -105,7 +105,7 @@ export default function Usage() {
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
       {/* Header */}
-      <header className="border-b border-zinc-900 px-6 py-4 flex items-center justify-between">
+      <header className="border-b border-zinc-900 px-4 py-3 md:px-6 md:py-4 flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3">
           <button
             onClick={() => navigate('/dashboard')}
@@ -128,7 +128,7 @@ export default function Usage() {
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-6 py-8">
+      <main className="max-w-6xl mx-auto px-4 py-6 md:px-6 md:py-8">
         {/* Stats */}
         {stats && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
@@ -205,7 +205,7 @@ export default function Usage() {
         )}
 
         {/* Filters & Actions */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
           <div className="flex items-center gap-3">
             <select
               value={filterProvider}

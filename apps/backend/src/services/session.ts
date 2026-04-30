@@ -2,7 +2,12 @@ import * as ptyLib from 'node-pty';
 import chokidar from 'chokidar';
 import { v4 as uuidv4 } from 'uuid';
 import os from 'os';
-import { cloneOrFetch, createWorktree, removeWorktree, pushBranch, getChangedFiles, mergeToMain as gitMergeToMain, pushMain } from './git';
+import simpleGit from 'simple-git';
+import {
+  cloneOrFetch, createWorktree, removeWorktree, pushBranch, getChangedFiles,
+  mergeToMain as gitMergeToMain, pushMain,
+  mergeOriginMainIntoBranch, mergeBranchIntoMain,
+} from './git';
 import { OutputParser, ParsedChunk } from './parser';
 import { Session, SessionSummary, ChatMessage } from '../types';
 import { recordUsage } from './usage';
@@ -122,6 +127,7 @@ export function addMessage(id: string, message: ChatMessage): boolean {
   if (s.messages.length > 500) {
     s.messages = s.messages.slice(-500);
   }
+
   persist();
   return true;
 }
@@ -313,5 +319,50 @@ export async function mergeToMainSession(id: string): Promise<void> {
   const s = sessions.get(id);
   if (!s?.repoPath || !s?.worktreePath) throw new Error('Session not found');
   await gitMergeToMain(s.repoPath, s.worktreePath, s.branch);
+  await pushMain(s.repoPath);
+}
+
+export async function mergeToMainWithConflictResolution(
+  id: string,
+  onConflicts: (files: string[]) => void
+): Promise<void> {
+  const s = sessions.get(id);
+  if (!s?.repoPath || !s?.worktreePath) throw new Error('Session not found');
+  if (s.status !== 'running') throw new Error('Session is not running. Start the session first so the AI can resolve conflicts.');
+
+  const worktreeGit = simpleGit(s.worktreePath);
+
+  // Phase 1: push branch and merge origin/main into feature branch
+  await pushBranch(s.worktreePath, s.branch);
+  const result = await mergeOriginMainIntoBranch(s.worktreePath);
+
+  if (!result.success && result.conflicted) {
+    onConflicts(result.conflicted);
+
+    // Instruct the running CLI agent to resolve the conflicts
+    const instruction =
+      `There are merge conflicts in: ${result.conflicted.join(', ')}. ` +
+      `Please resolve these conflicts and then run: git add . && git commit -m "Resolve merge conflicts"`;
+    s.pty?.write(instruction + '\r');
+
+    // Poll every 3s until conflicts are gone or we time out (~5 min)
+    for (let i = 0; i < 100; i++) {
+      await new Promise((r) => setTimeout(r, 3000));
+      const poll = await worktreeGit.status().catch(() => null);
+      if (poll && poll.conflicted.length === 0) {
+        if (!poll.isClean()) {
+          await worktreeGit.commit('Resolve merge conflicts').catch(() => null);
+        }
+        break;
+      }
+      if (i === 99) {
+        throw new Error('Timed out waiting for the AI to resolve merge conflicts');
+      }
+    }
+  }
+
+  // Phase 2: push the resolved branch and merge into main
+  await pushBranch(s.worktreePath, s.branch);
+  await mergeBranchIntoMain(s.repoPath, s.branch);
   await pushMain(s.repoPath);
 }

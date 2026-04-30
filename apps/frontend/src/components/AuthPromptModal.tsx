@@ -47,10 +47,10 @@ export default function AuthPromptModal({ provider, url, code, onClose }: Props)
           <h3 className={`text-lg font-semibold ${meta.color}`}>{meta.name} — Sign In Required</h3>
           <button
             onClick={onClose}
-            className="text-zinc-500 hover:text-zinc-300 transition-colors"
+            className="flex items-center justify-center w-9 h-9 rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
             title="Dismiss"
           >
-            <X size={18} />
+            <X size={20} />
           </button>
         </div>
 

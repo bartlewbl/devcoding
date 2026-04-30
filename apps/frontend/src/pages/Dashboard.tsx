@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Github, LogOut, Zap, Clock, CheckCircle, XCircle, FolderGit, BarChart3, Pencil } from 'lucide-react';
+import { Plus, Github, LogOut, Zap, Clock, CheckCircle, XCircle, FolderGit, BarChart3, Pencil, Loader2 } from 'lucide-react';
+import Spinner from '../components/Spinner';
 import { useAuth } from '../hooks/useAuth';
 import { useSocket } from '../hooks/useSocket';
 import api from '../lib/api';
@@ -9,10 +10,10 @@ import { SessionSummary } from '../types';
 
 const BACKEND = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
 
-const STATUS_ICON = {
-  creating: <Clock size={12} className="text-yellow-500" />,
+const STATUS_ICON: Record<string, React.ReactNode> = {
+  creating: <Spinner size={12} className="text-yellow-500" />,
   ready: <CheckCircle size={12} className="text-green-500" />,
-  running: <Zap size={12} className="text-blue-400" />,
+  running: <Spinner size={12} className="text-blue-400" />,
   stopped: <Clock size={12} className="text-orange-400" />,
   ended: <XCircle size={12} className="text-zinc-600" />,
 };
@@ -76,20 +77,20 @@ export default function Dashboard() {
           )}
           <button
             onClick={() => navigate('/worktrees')}
-            className="flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-300 transition-colors"
+            className="flex items-center justify-center w-9 h-9 rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
             title="Manage worktrees"
           >
-            <FolderGit size={16} />
+            <FolderGit size={18} />
           </button>
           <button
             onClick={() => navigate('/usage')}
-            className="flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-300 transition-colors"
+            className="flex items-center justify-center w-9 h-9 rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
             title="Manage usage"
           >
-            <BarChart3 size={16} />
+            <BarChart3 size={18} />
           </button>
-          <button onClick={logout} className="text-zinc-500 hover:text-zinc-300 transition-colors">
-            <LogOut size={16} />
+          <button onClick={logout} className="flex items-center justify-center w-9 h-9 rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors">
+            <LogOut size={18} />
           </button>
         </div>
       </header>
@@ -132,7 +133,7 @@ export default function Dashboard() {
                         <div
                           key={s.id}
                           onClick={() => navigate(`/session/${s.id}`)}
-                          className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 text-left hover:border-zinc-700 transition-colors cursor-pointer"
+                          className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 text-left hover:border-zinc-700 active:bg-zinc-800 transition-colors cursor-pointer"
                         >
                           <div className="flex items-center gap-2 mb-2">
                             {STATUS_ICON[s.status]}
@@ -171,10 +172,10 @@ export default function Dashboard() {
                                   setEditingId(s.id);
                                   setEditName(s.name || '');
                                 }}
-                                className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-zinc-300 transition-opacity shrink-0"
+                                className="opacity-0 group-hover:opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-zinc-500 hover:text-zinc-300 transition-opacity shrink-0 p-1 -mr-1"
                                 title="Rename"
                               >
-                                <Pencil size={10} />
+                                <Pencil size={12} />
                               </button>
                             </div>
                           )}

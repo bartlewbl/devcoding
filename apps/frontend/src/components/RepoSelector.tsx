@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Search, Lock, Globe } from 'lucide-react';
+import Spinner from './Spinner';
 import api from '../lib/api';
 import { GithubRepo } from '../types';
 
@@ -24,7 +25,7 @@ export default function RepoSelector({ onSelect, selected }: Props) {
     r.full_name.toLowerCase().includes(query.toLowerCase())
   );
 
-  if (loading) return <div className="text-zinc-500 text-sm py-4 text-center">Loading repos…</div>;
+  if (loading) return <div className="text-zinc-500 text-sm py-4 text-center flex items-center justify-center gap-2"><Spinner size={14} /> Loading repos…</div>;
 
   return (
     <div className="space-y-2">

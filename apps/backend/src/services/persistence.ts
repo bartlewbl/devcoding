@@ -19,11 +19,11 @@ function migrateFromJson(): void {
       INSERT OR REPLACE INTO sessions (
         id, userId, repoUrl, repoFullName, repoPath, worktreePath,
         branch, model, modelName, effort, status,
-        createdAt, lastActivityAt, stoppedAt, outputBuffer, messages
+        createdAt, lastActivityAt, stoppedAt, outputBuffer, messages, name
       ) VALUES (
         $id, $userId, $repoUrl, $repoFullName, $repoPath, $worktreePath,
         $branch, $model, $modelName, $effort, $status,
-        $createdAt, $lastActivityAt, $stoppedAt, $outputBuffer, $messages
+        $createdAt, $lastActivityAt, $stoppedAt, $outputBuffer, $messages, $name
       )
     `);
     const migrate = getDb().transaction((rows: any[]) => {
@@ -45,6 +45,7 @@ function migrateFromJson(): void {
           stoppedAt: s.stoppedAt ?? null,
           outputBuffer: s.outputBuffer ?? '',
           messages: JSON.stringify(s.messages ?? []),
+          name: s.name ?? null,
         });
       }
     });
@@ -79,6 +80,7 @@ export function loadSessions(): PersistedSession[] {
       stoppedAt: r.stoppedAt ?? undefined,
       outputBuffer: r.outputBuffer,
       messages: JSON.parse(r.messages),
+      name: r.name ?? undefined,
     }));
   } catch (err) {
     console.error('[persistence] failed to load sessions:', err);
@@ -92,11 +94,11 @@ export function saveSessions(sessions: Map<string, Session>): void {
       INSERT OR REPLACE INTO sessions (
         id, userId, repoUrl, repoFullName, repoPath, worktreePath,
         branch, model, modelName, effort, status,
-        createdAt, lastActivityAt, stoppedAt, outputBuffer, messages
+        createdAt, lastActivityAt, stoppedAt, outputBuffer, messages, name
       ) VALUES (
         $id, $userId, $repoUrl, $repoFullName, $repoPath, $worktreePath,
         $branch, $model, $modelName, $effort, $status,
-        $createdAt, $lastActivityAt, $stoppedAt, $outputBuffer, $messages
+        $createdAt, $lastActivityAt, $stoppedAt, $outputBuffer, $messages, $name
       )
     `);
     const save = getDb().transaction((rows: PersistedSession[]) => {
@@ -118,6 +120,7 @@ export function saveSessions(sessions: Map<string, Session>): void {
           stoppedAt: s.stoppedAt ?? null,
           outputBuffer: s.outputBuffer,
           messages: JSON.stringify(s.messages),
+          name: s.name ?? null,
         });
       }
     });
@@ -138,6 +141,7 @@ export function saveSessions(sessions: Map<string, Session>): void {
       stoppedAt: s.stoppedAt,
       outputBuffer: s.outputBuffer,
       messages: s.messages,
+      name: s.name,
     }));
     save(rows);
   } catch (err) {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Socket } from 'socket.io-client';
 import { Plus } from 'lucide-react';
+import Spinner from './Spinner';
 import RepoSelector from './RepoSelector';
 import { SessionSummary, GithubRepo } from '../types';
 import api from '../lib/api';
@@ -167,7 +168,7 @@ export default function NewSessionModal({ socket, onClose, onCreated }: Props) {
             disabled={!selectedRepo || creating}
             className="flex-1 py-2.5 rounded-lg text-sm bg-zinc-700 text-zinc-100 hover:bg-zinc-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            {creating ? 'Creating…' : 'Create Session'}
+            {creating ? <span className="flex items-center justify-center gap-1.5"><Spinner size={14} /> Creating…</span> : 'Create Session'}
           </button>
         </div>
       </div>

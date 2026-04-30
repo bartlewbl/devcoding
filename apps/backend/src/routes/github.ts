@@ -2,11 +2,41 @@ import { Router } from 'express';
 import axios from 'axios';
 import { Octokit } from '@octokit/rest';
 import { authMiddleware } from '../middleware/auth';
+import { getDb } from '../db';
 
 const router = Router();
 
-// userId → github token (in-memory; fine for a local single-user tool)
-export const githubTokens = new Map<string, string>();
+function loadTokens(): Map<string, string> {
+  const map = new Map<string, string>();
+  try {
+    const rows = getDb().prepare('SELECT userId, token FROM github_tokens').all() as any[];
+    for (const row of rows) {
+      map.set(row.userId, row.token);
+    }
+  } catch (err) {
+    console.error('[github] failed to load tokens:', err);
+  }
+  return map;
+}
+
+function persistToken(userId: string, token: string) {
+  try {
+    getDb().prepare('INSERT OR REPLACE INTO github_tokens (userId, token) VALUES (?, ?)').run(userId, token);
+  } catch (err) {
+    console.error('[github] failed to persist token:', err);
+  }
+}
+
+function removeToken(userId: string) {
+  try {
+    getDb().prepare('DELETE FROM github_tokens WHERE userId = ?').run(userId);
+  } catch (err) {
+    console.error('[github] failed to remove token:', err);
+  }
+}
+
+// userId → github token (loaded from SQLite so they survive server restarts)
+export const githubTokens = loadTokens();
 // tempKey → github token (for the OAuth handoff)
 const tempTokens = new Map<string, string>();
 
@@ -55,6 +85,7 @@ router.get('/redeem', authMiddleware, (req, res) => {
 
   tempTokens.delete(key);
   githubTokens.set(req.userId!, token);
+  persistToken(req.userId!, token);
   res.json({ success: true });
 });
 

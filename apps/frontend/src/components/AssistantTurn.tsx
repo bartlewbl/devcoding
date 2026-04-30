@@ -141,8 +141,34 @@ function CodeBlock({
   const raw = String(children ?? '');
   const isBlock = inline === false || Boolean(lang) || raw.includes('\n');
 
+  // Kimi diff header sentinel — emitted by preprocessKimiPanels as the first
+  // line of a `diff` fence. Pull "+1 -1 /path/to/file" out and render it in
+  // the card's title bar (split into colored stat chips + truncated path).
+  let kimiPath: string | undefined;
+  let kimiPlus: string | undefined;
+  let kimiMinus: string | undefined;
+  let displayRaw = raw;
+  if (lang === 'diff') {
+    const firstLineEnd = raw.indexOf('\n');
+    const firstLine = firstLineEnd >= 0 ? raw.slice(0, firstLineEnd) : raw;
+    const headerMatch = firstLine.match(KIMI_HDR_RE);
+    if (headerMatch) {
+      const inner = headerMatch[1].trim();
+      const stats = inner.match(/^([+\-]\d+)\s+([+\-]\d+)\s+(.+)$/);
+      if (stats) {
+        const [, a, b, p] = stats;
+        if (a.startsWith('+')) { kimiPlus = a.slice(1); kimiMinus = b.replace(/^[+\-]/, ''); }
+        else { kimiMinus = a.slice(1); kimiPlus = b.replace(/^[+\-]/, ''); }
+        kimiPath = p.trim();
+      } else {
+        kimiPath = inner;
+      }
+      displayRaw = firstLineEnd >= 0 ? raw.slice(firstLineEnd + 1) : '';
+    }
+  }
+
   const copy = () => {
-    const text = raw.replace(/\n$/, '');
+    const text = displayRaw.replace(/\n$/, '');
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
@@ -160,39 +186,75 @@ function CodeBlock({
     );
   }
 
-  const text = String(children).replace(/\n$/, '');
+  const text = displayRaw.replace(/\n$/, '');
   const lines = text.split('\n');
+  const hasKimiHeader = Boolean(kimiPath);
 
   return (
     <div className="my-3 rounded-lg overflow-hidden border border-zinc-800/80 shadow-sm">
-      <div className="flex items-center justify-between px-3 py-1.5 bg-zinc-900/90 border-b border-zinc-800/80">
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider">
-            {lang || 'text'}
-          </span>
+      <div className="flex items-center justify-between gap-3 px-3 py-1.5 bg-zinc-900/90 border-b border-zinc-800/80 min-w-0">
+        <div className="flex items-center gap-2 min-w-0">
+          {hasKimiHeader ? (
+            <>
+              {kimiPlus && (
+                <span className="text-[10px] font-mono text-emerald-400 shrink-0">+{kimiPlus}</span>
+              )}
+              {kimiMinus && (
+                <span className="text-[10px] font-mono text-red-400 shrink-0">−{kimiMinus}</span>
+              )}
+              <span className="text-[11px] font-mono text-zinc-300 truncate" title={kimiPath}>
+                {kimiPath}
+              </span>
+            </>
+          ) : (
+            <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider">
+              {lang || 'text'}
+            </span>
+          )}
         </div>
         <button
           onClick={copy}
-          className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors"
+          className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors px-2 py-1 rounded shrink-0"
         >
-          {copied ? <Check size={10} /> : <Copy size={10} />}
+          {copied ? <Check size={12} /> : <Copy size={12} />}
           {copied ? 'Copied' : 'Copy'}
         </button>
       </div>
       <div className="flex bg-zinc-950">
-        {/* Line numbers */}
-        <div className="select-none py-3 pl-3 pr-2 text-right bg-zinc-950 border-r border-zinc-900/50">
-          {lines.map((_, i) => (
-            <div key={i} className="text-[11px] font-mono text-zinc-700 leading-5">
-              {i + 1}
-            </div>
-          ))}
-        </div>
-        {/* Code */}
+        {!hasKimiHeader && (
+          <div className="select-none py-3 pl-3 pr-2 text-right bg-zinc-950 border-r border-zinc-900/50">
+            {lines.map((_, i) => (
+              <div key={i} className="text-[11px] font-mono text-zinc-700 leading-5">
+                {i + 1}
+              </div>
+            ))}
+          </div>
+        )}
         <pre className="flex-1 p-3 overflow-x-auto">
-          <code className="font-mono text-xs text-zinc-300 leading-5" {...props}>
-            {children}
-          </code>
+          {hasKimiHeader ? (
+            <code className="font-mono text-xs leading-5 block" {...props}>
+              {lines.map((line, i) => {
+                // Diff marker sits right after the source-line number, e.g.
+                // "58 - <h1>old</h1>" or "58 + <h1>new</h1>". Lines without
+                // a marker (context rows) render in default color.
+                const m = line.match(/^\s*\d+\s+([+\-])(?=\s|$)/);
+                const marker = m?.[1];
+                const cls =
+                  marker === '+' ? 'text-emerald-400 bg-emerald-950/20'
+                  : marker === '-' ? 'text-red-400 bg-red-950/20'
+                  : 'text-zinc-300';
+                return (
+                  <div key={i} className={`${cls} px-1 -mx-1`}>
+                    {line || ' '}
+                  </div>
+                );
+              })}
+            </code>
+          ) : (
+            <code className="font-mono text-xs text-zinc-300 leading-5" {...props}>
+              {children}
+            </code>
+          )}
         </pre>
       </div>
     </div>
@@ -290,8 +352,90 @@ function SystemDivider({ content }: { content: string }) {
   );
 }
 
+/* ── Kimi diff panel preprocess ──────────────────────────────
+ * Kimi (Rich) renders tool diffs and code in a Unicode box:
+ *   ╭─ +1 -1 /path/to/file ──╮
+ *   │ 55  <div className=…>   │
+ *   │ 58 -<h1>old</h1>        │
+ *   │ 58 +<h1>new</h1>        │
+ *   ╰─────────────────────────╯
+ * Older sessions persisted these raw, and the backend may also miss edge
+ * cases. Convert the entire panel into a fenced ```diff block: bold the
+ * stat header, then collect the row content as code-fenced lines. */
+function preprocessKimiPanels(content: string): string {
+  if (!/[│┃╭╮╯╰┌┐└┘]/.test(content) && !/^\s*\|.*\|\s*$/m.test(content)) {
+    return content;
+  }
+  const PANEL_HEADER = /^[╭╮╯╰┌┐└┘][─━┄┅\-]+\s*(.+?)\s*[─━┄┅\-]+[╭╮╯╰┌┐└┘]?\s*$/;
+  const PANEL_BORDER = /^[╭╮╯╰┌┐└┘][─━┄┅\-]+[╭╮╯╰┌┐└┘]?\s*$/;
+  const PANEL_ROW = /^[│┃|]\s?(.*?)\s?[│┃|]\s*$/;
+  const lines = content.split('\n');
+  const out: string[] = [];
+  let inFence = false;
+  let pendingHeader: string | null = null;
+  const closeFence = () => {
+    if (inFence) {
+      out.push('```');
+      inFence = false;
+    }
+  };
+  const flushPendingHeader = () => {
+    if (pendingHeader) {
+      if (out.length && out[out.length - 1].trim() !== '') out.push('');
+      out.push(`**${pendingHeader}**`);
+      pendingHeader = null;
+    }
+  };
+  const openFence = () => {
+    if (out.length && out[out.length - 1].trim() !== '') out.push('');
+    out.push('```diff');
+    if (pendingHeader) {
+      // KIMI_HDR sentinel encodes the file/stats so CodeBlock can lift it
+      // into the diff card's title bar instead of rendering as a paragraph.
+      out.push(`<<<KIMI_HDR>>>${pendingHeader}<<<KIMI_HDR>>>`);
+      pendingHeader = null;
+    }
+    inFence = true;
+  };
+  for (const line of lines) {
+    const t = line.trim();
+    // Inside a fence, swallow blank lines and panel border continuations so the
+    // diff stays one contiguous block even when persisted with paragraph gaps.
+    if (inFence && t === '') continue;
+    if (PANEL_BORDER.test(t)) {
+      closeFence();
+      flushPendingHeader();
+      continue;
+    }
+    const headerMatch = t.match(PANEL_HEADER);
+    if (headerMatch && headerMatch[1].trim()) {
+      closeFence();
+      flushPendingHeader();
+      pendingHeader = headerMatch[1].replace(/\*\*/g, '').replace(/__/g, '').trim();
+      continue;
+    }
+    const rowMatch = t.match(PANEL_ROW);
+    if (rowMatch) {
+      const inner = rowMatch[1].replace(/\*\*/g, '').replace(/__/g, '').trimEnd();
+      if (!inner) continue;
+      if (!inFence) openFence();
+      out.push(inner);
+      continue;
+    }
+    closeFence();
+    flushPendingHeader();
+    out.push(line);
+  }
+  closeFence();
+  flushPendingHeader();
+  return out.join('\n');
+}
+
+const KIMI_HDR_RE = /^<<<KIMI_HDR>>>(.+?)<<<KIMI_HDR>>>$/;
+
 /* ── Markdown renderer ───────────────────────────────────── */
 function Markdown({ content }: { content: string }) {
+  const cleaned = preprocessKimiPanels(content);
   return (
     <div className="prose prose-invert prose-sm max-w-none text-zinc-200 leading-relaxed">
       <ReactMarkdown
@@ -338,7 +482,7 @@ function Markdown({ content }: { content: string }) {
           em: ({ children }) => <em className="text-zinc-300 italic">{children}</em>,
         }}
       >
-        {content}
+        {cleaned}
       </ReactMarkdown>
     </div>
   );
@@ -380,6 +524,8 @@ export default function AssistantTurn({ messages, model }: Props) {
       /^>\s?/.test(t) ||            // blockquote
       /^#{1,6}\s/.test(t) ||        // heading
       /^\|/.test(t) ||              // table row
+      /^[│┃]/.test(t) ||            // kimi panel row (Unicode box)
+      /^[╭╮╯╰┌┐└┘]/.test(t) ||      // kimi panel border
       /^```/.test(t)                // fence
     );
   };

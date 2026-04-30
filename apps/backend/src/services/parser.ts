@@ -301,6 +301,7 @@ function isGarbage(t: string): boolean {
 // Example: "⎿ Read 50 lines" or "└ Updated 3 files".
 const RESULT_MARKER_RE = /^[⎿└↳]\s*/u;
 
+
 function createIsToolCall(config: ProviderConfig) {
   const TOOL_RE = new RegExp(`^(${config.toolPrefixes.join('|')})\\b`, 'i');
   const PAREN_RE = new RegExp(`^(${config.toolPrefixes.join('|')})\\s*\\(`, 'i');
@@ -674,6 +675,11 @@ export class OutputParser {
           extractedToolName = toolName(t, config);
           this.lastToolName = extractedToolName;
         } else {
+          // Kimi/Rich diff panels (lines like "│ 55 <code> │" or panel borders)
+          // are passed through verbatim so the frontend preprocessor can
+          // convert the entire panel into a single fenced diff block with the
+          // file path in the title bar. See preprocessKimiPanels in
+          // AssistantTurn.tsx.
           kind = 'ai-text';
           content = toMarkdownLine(clean, allBold);
         }

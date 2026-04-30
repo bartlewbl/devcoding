@@ -17,10 +17,10 @@ export default function FileTree({ files, selected, onSelect }: Props) {
         <button
           key={f}
           onClick={() => onSelect(f)}
-          className={`w-full flex items-center gap-2 px-3 py-1.5 rounded text-left hover:bg-zinc-800 transition-colors ${selected === f ? 'bg-zinc-800' : ''}`}
+          className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-left hover:bg-zinc-800 transition-colors ${selected === f ? 'bg-zinc-800' : ''}`}
         >
-          <FileCode size={12} className="text-yellow-500 shrink-0" />
-          <span className="font-mono text-xs text-zinc-300 truncate">{f}</span>
+          <FileCode size={14} className="text-yellow-500 shrink-0" />
+          <span className="font-mono text-sm text-zinc-300 truncate">{f}</span>
         </button>
       ))}
     </div>
