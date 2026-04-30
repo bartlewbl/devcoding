@@ -119,9 +119,9 @@ export async function commitChanges(worktreePath: string, message: string): Prom
   await git.commit(message);
 }
 
-export async function pushBranch(worktreePath: string, branch: string): Promise<void> {
+export async function pushBranch(worktreePath: string, branch: string, commitMessage?: string): Promise<void> {
   const git = simpleGit(worktreePath);
-  await commitChanges(worktreePath, 'AI-generated changes');
+  await commitChanges(worktreePath, commitMessage || 'AI-generated changes');
   try {
     await git.push(['origin', branch, '--set-upstream']);
   } catch (err: any) {

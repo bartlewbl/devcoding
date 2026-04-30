@@ -13,6 +13,7 @@ import { Session, SessionSummary, ChatMessage } from '../types';
 import { recordUsage } from './usage';
 import { loadSessions, saveSessions } from './persistence';
 import { getKimiDefaultModel } from './kimiConfig';
+import { generateCommitMessageWithKimi } from './topic-generator';
 
 const OUTPUT_BUFFER_MAX = 50_000;
 const sessions = new Map<string, Session>();
@@ -312,7 +313,9 @@ export function renameSession(id: string, name: string): SessionSummary | undefi
 export async function pushSession(id: string): Promise<void> {
   const s = sessions.get(id);
   if (!s?.worktreePath) throw new Error('Session not found');
-  await pushBranch(s.worktreePath, s.branch);
+
+  const commitMessage = await generateCommitMessageWithKimi(id, s.worktreePath, s.messages);
+  await pushBranch(s.worktreePath, s.branch, commitMessage);
 }
 
 export async function mergeToMainSession(id: string): Promise<void> {
